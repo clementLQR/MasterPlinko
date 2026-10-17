@@ -18,9 +18,18 @@ export const CONFIG = {
 } as const;
 
 export const VIEWS = {
-  plinko: { x: 0, y: -0.35, width: 12.8, height: 14.4 },
-  azur: { x: 10, y: -2.2, width: 10.5, height: 10.5 },
+  plinko: { x: 0.6, y: 0.1, width: 28, height: 18.4 },
+  azur: { x: 10.3, y: -1.2, width: 17.8, height: 14.8 },
 } as const;
+
+// Emplacements visuels. Les modules futurs n’ajoutent aucun achat ni règle économique.
+export const MODULE_SLOTS = [
+  { id: 'auto_launcher', unlockId: 'azur.auto_launcher', position: [-6.2, 3.05, 0.1] },
+  { id: 'accounting_tray', unlockId: 'azur.accounting_tray', position: [6.05, -3.5, 0.4] },
+  { id: 'duplicator', unlockId: 'azur.duplicator', position: [0, -6.7, 1.2] },
+  { id: 'instability_counter', unlockId: 'azur.instability_counter', position: [6.1, 4.1, 0.05] },
+  { id: 'ventilation', unlockId: 'azur.ventilation', position: [0, 7.05, -0.1] },
+] as const;
 
 export const OUTCOMES = [
   { multiplier: 30, weight: 400, exits: [7] },

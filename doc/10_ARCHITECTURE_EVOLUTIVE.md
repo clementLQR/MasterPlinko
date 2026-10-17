@@ -99,6 +99,9 @@ Une nouvelle demande remplace la cible ; aucune file d'animations. En mouvement 
 L'horloge économique continue pendant la navigation et les achats ; changer de vue ne recrée ni la simulation ni les billes en cours.
 À la reprise, cadrage Plinko ; aucune nécessité de sauvegarder une interpolation de caméra.
 
+Le menu des destinations de l’escalier est non bloquant : sa présence ne suspend pas l’horloge active. Les dialogues de sauvegarde, d’import et d’informations restent bloquants. La sélection de l’usine appelle les règles existantes, sans file de services ni départ automatique.
+Le rendu construit cinq groupes de modules à des emplacements configurés, puis applique leur visibilité depuis les achats de l’état. Les identifiants de modules futurs ne sont pas ajoutés aux améliorations économiques ni au contrat de sauvegarde.
+
 ## Vérifications
 Tester le tirage avec un générateur injecté, les transactions, les 50 billes, les bonus, l'usine, la reprise, la panne unique et l'import.
 Mesurer la fluidité réelle de 50 billes ; une limite d'images par seconde n'est pas un modèle économique.

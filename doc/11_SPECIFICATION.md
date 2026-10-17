@@ -152,8 +152,10 @@ Un seul onglet écrit : les autres sont suspendus.
 Le protocole évite les duplications accidentelles ; il n'empêche pas un utilisateur de modifier sa sauvegarde ou d'en restaurer volontairement une ancienne.
 
 ## 11. Visuel et interactions
-- Machine en bois et métal, fixations, picots, bac, bouton et compteur.
-- Un sol, un mur et une lumière de cave suggèrent le chalet.
+- Direction artistique : lofi numérique dans une cave aménagée sous le chalet de Papy, selon les images de référence du créateur. Décor intégralement 3D : pierres irrégulières, plafond bas à poutres, sol ancien, tapis usé, escalier en bois à gauche, établi et rangements à droite, outils, boîtes et bûches.
+- Fenêtre haute sur une nuit pluvieuse avec lumière extérieure bleutée ; ampoule suspendue et lampe d’établi chaudes. Formes adoucies, matériaux stylisés, ambiance accueillante et légèrement poussiéreuse. Préserver la lisibilité des commandes et du plateau.
+- Plinko contre le mur de pierre, près de l’établi : bois clair, plateau crème, vert sauge, rose poudré, lavande, petits écrans à pixels, compteur lumineux et gros bouton physique.
+- Modules en objets 3D indépendants attachés à des emplacements définis. Doigt mécanique et Bac comptable apparaissent après leur achat, y compris au chargement d’une sauvegarde existante. Duplicateur, compteur d’instabilité et ventilation restent cachés tant que leurs acquisitions ne sont pas implémentées ; leurs modèles préparés n’ajoutent aucune mécanique future.
 - Deux positions de caméra fixes reliées par de courtes transitions : Plinko et établi d'Azur. Plateau entièrement lisible depuis sa vue.
 - Matériaux, textures simples générées par code et éclairage soignés.
 - Menus HTML/CSS français, lisibles, accessibles au clavier.
@@ -167,7 +169,11 @@ Ne pas faire du développement initial un dashboard générique sans machine 3D.
 ### Navigation dans la pièce — choix validé
 Une seule scène 3D avec machine et établi visibles dans des cadrages distincts. Cliquer sur l'établi déplace et oriente la caméra vers lui ; cliquer sur la machine permet de revenir.
 Ajouter des flèches discrètes et des commandes directes pour rejoindre toute vue disponible. Ne jamais imposer une traversée séquentielle de cadrages.
-La porte reste accessible comme action ouvrant le choix d'aller à l'usine ; aucun troisième point de caméra n'est obligatoire dans le développement initial.
+L’escalier remplace la porte pour toutes les destinations extérieures. Au survol, afficher un repère discret et « Sortir de la cave ». Au clic, ouvrir un menu sans déplacement ni début de travail automatique. Ajouter un accès HTML direct utilisable au clavier ; aucun troisième cadrage n’est imposé.
+
+Destinations : Aller travailler à l’usine ; Rendre visite à Azur ; Rendre visite à Marceau ; Rendre visite à Matéo ; Rester dans la cave. Les visites se débloquent avec les rencontres ; une destination non implémentée reste explicitement indisponible, même si le personnage est rencontré. Aucune nouvelle mécanique de visite n’est créée. Rester dans la cave ferme seulement le menu.
+
+Le menu des destinations ne suspend ni les billes, ni la production, ni la durée de Surchauffe. Seul le choix explicite de l’usine arrête l’automatisation. Si des billes restent en cours, laisser leurs règlements continuer et demander de sélectionner à nouveau l’usine après leur arrivée ; aucun service en attente ni salaire anticipé. Conserver les autres règles de l’usine, de l’onglet caché et des scènes bloquantes.
 
 Paramètre de départ : transition de 0,5 seconde, interpolation douce de position et orientation. Réglage animations réduites : transition instantanée.
 Pendant une transition, bloquer les interactions manuelles avec les objets et panneaux concernés. Une nouvelle demande de navigation remplace la cible précédente ; aucune file de mouvements.

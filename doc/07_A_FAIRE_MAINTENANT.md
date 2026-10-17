@@ -15,7 +15,7 @@ Le prototype est implémenté. L’essai du créateur et l’équilibrage resten
 - [x] Plafond de 50 billes simultanées.
 - [x] Dépôt GitHub souhaité, essais localhost.
 - [x] Valeurs de test séparées des valeurs de l'histoire.
-- [x] Navigation sans marche libre : vues Plinko et établi, porte accessible.
+- [x] Navigation sans marche libre : vues Plinko et établi, escalier accessible pour les sorties.
 
 Les valeurs complétées par l'assistant sont des réglages de départ modifiables, pas des tests déjà réussis.
 
@@ -77,9 +77,10 @@ Le dépôt distant est configuré sur https://github.com/clementLQR/MasterPlinko
 ## Vérifications exécutées
 - `npm run build` : contrôle TypeScript et build de production réussis.
 - `npm test` : 19 tests de logique réussis (économie, transactions, refus, temps actif, sauvegarde, imports, tirage, trajectoires et navigation).
-- `npm run test:browser` : 8 parcours Chrome réussis, dont reprise d’un vol sans second paiement, import confirmé, atelier, salaire unique, concurrence entre onglets, navigation, mouvement réduit et échec de stockage sans débit.
+- `npm run test:browser` : 10 parcours Chrome réussis, dont reprise d’un vol sans second paiement, import confirmé, atelier, salaire unique, concurrence entre onglets, navigation, mouvement réduit et échec de stockage sans débit. Nouveaux contrôles : survol/clic sur l’escalier 3D, visites explicitement verrouillées, aucun départ à l’ouverture du menu, production et bonus actifs dans ce menu, modules selon les achats et attente des billes avant le service.
 - Les 15 sorties sont vérifiées par échantillonnage des trajectoires, avec une distance aux picots supérieure au rayon cumulé bille/picot.
-- Captures inspectées pour la machine à 1280 × 720 et l’établi ; correction du chevauchement des panneaux et amélioration des étiquettes de sortie.
-- Scénario de 50 billes réellement rendues et réglées : réussi. La mesure brute était d’environ 2 images/s avec rendu logiciel forcé sur une surface de 1440 × 1000, incluant le démarrage du rendu. Cette mesure ne valide pas la fluidité sur GPU réel ; le réglage de qualité légère est disponible et l’essai sur la machine du créateur reste nécessaire.
+- Captures inspectées pour la machine à 1280 × 720, la cave, l’établi et le menu des destinations. Cave désormais construite en 3D avec murs de pierre, retour latéral fermé, plafond bas, poutres, fenêtre pluvieuse, éclairages chauds et bleutés, escalier, tapis et rangements. Plateau crème lisible et modules visibles uniquement selon les acquisitions.
+- Après les derniers ajustements du mur latéral et de l’opacité du menu, build et 19 tests de logique relancés avec succès, ainsi que les 3 parcours Chrome ciblés navigation/escalier/modules.
+- Scénario de 50 billes réellement rendues et réglées : réussi. La mesure brute était d’environ 0,8 image/s avec rendu logiciel forcé sur une surface de 1440 × 1000, incluant le démarrage du rendu. Cette mesure ne valide pas la fluidité sur GPU réel ; le réglage de qualité légère est disponible et l’essai sur la machine du créateur reste nécessaire.
 - Pause en onglet inactif : logique vérifiée par horloge inactive injectée ; une session réelle d’onglet masqué et la partie utilisateur de 10 à 15 minutes restent à observer.
-- Les captures et rapports sont dans `test-results/`, ignoré par Git. Aucun commit, push ou déploiement effectué.
+- Les captures et rapports sont dans `test-results/`, ignoré par Git. Cette adaptation conserve les règles économiques et le contrat des sauvegardes. Aucun nouveau commit, push ou déploiement effectué pour cette adaptation.

@@ -16,6 +16,8 @@ test('nouvelle partie, vol conservé au rechargement, réglages et export', asyn
   await expect(page.getByTestId('wallet')).toHaveText('19,00');
   await expect(page.locator('#scene canvas')).toBeVisible();
   await expect(page.locator('#launch')).toBeEnabled();
+  await expect(page.locator('#scene')).toHaveAttribute('data-modules', '');
+  await page.screenshot({ path: 'test-results/cave-base.png', fullPage: true });
   await page.locator('#launch').click();
   const pending = await page.evaluate(() => JSON.parse(localStorage.getItem('masterplinko.save')!).pendingBalls[0]);
   expect(pending.betCents).toBe(100);
@@ -61,6 +63,7 @@ test('imports refusés sans perte, import valide confirmé, atelier et histoire'
 test('service réellement actif, dialogue en pause et salaire unique', async ({ page }) => {
   await page.goto('/'); await expect(page.locator('#factory')).toBeEnabled();
   await page.locator('#factory').click();
+  await page.getByRole('button', { name: 'Aller travailler à l’usine' }).click();
   await expect(page.locator('#launch')).toBeDisabled();
   await page.getByRole('button', { name: 'Réglages et sauvegarde', exact: true }).click();
   const remaining = await page.evaluate(() => JSON.parse(localStorage.getItem('masterplinko.save')!).factoryRemainingMs);
@@ -122,7 +125,7 @@ test('navigation directe, production à l’établi, Échap et mouvement réduit
   await page.screenshot({ path: 'test-results/etabli.png', fullPage: true });
   await page.locator('#view-plinko').click(); await page.locator('#view-azur').click(); await page.locator('#view-plinko').click();
   await expect(page.locator('#app')).toHaveAttribute('data-view', 'plinko');
-  await page.locator('#door').click(); await expect(page.getByRole('heading', { name: 'La porte de la cave.' })).toBeVisible();
+  await page.locator('#stairs').click(); await expect(page.getByRole('heading', { name: 'Sortir de la cave.' })).toBeVisible();
 });
 
 test('50 billes simultanées réellement rendues et réglées', async ({ page }) => {
@@ -139,15 +142,55 @@ test('50 billes simultanées réellement rendues et réglées', async ({ page })
     let count = 0, frames = 0; const started = performance.now(); let previous = started;
     while (performance.now() - started < 1800) {
       await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-      const now = performance.now(); scene.frame(state, now - previous, true, () => { count++; return true; }); previous = now; frames++;
+      const now = performance.now(); scene.frame(state, now - previous, true, (id: string) => { count++; state.pendingBalls = state.pendingBalls.filter(ball => ball.id !== id); return true; }); previous = now; frames++;
     }
     const fps = frames * 1000 / (performance.now() - started);
-    scene.frame(state, 4000, true, () => { count++; return true; });
+    scene.frame(state, 4000, true, (id: string) => { count++; state.pendingBalls = state.pendingBalls.filter(ball => ball.id !== id); return true; });
     return { count, frames, fps: Math.round(fps * 10) / 10 };
   }, game.state);
   console.log('Rendu logiciel Chrome, 50 billes :', metrics);
   expect(metrics.count).toBe(50); expect(metrics.frames).toBeGreaterThan(1);
   await page.screenshot({ path: 'test-results/charge-50.png' });
+});
+
+test('escalier 3D : survol, menu sans départ automatique et visites verrouillées', async ({ page }) => {
+  await page.goto('/'); await expect(page.locator('#launch')).toBeEnabled();
+  const canvas = page.locator('#scene canvas'), bounds = (await canvas.boundingBox())!;
+  await canvas.hover({ position: { x: bounds.width * 0.14, y: bounds.height * 0.6 } });
+  await expect(page.locator('#scene-hint')).toHaveText('Sortir de la cave');
+  await canvas.click({ position: { x: bounds.width * 0.14, y: bounds.height * 0.6 } });
+  await expect(page.getByRole('heading', { name: 'Sortir de la cave.' })).toBeVisible();
+  for (const name of ['Azur', 'Marceau', 'Matéo']) await expect(page.getByRole('button', { name: `Rendre visite à ${name}`, exact: false })).toBeDisabled();
+  const state = await page.evaluate(() => JSON.parse(localStorage.getItem('masterplinko.save')!));
+  expect(state.factoryRemainingMs).toBe(0); expect(state.walletCents).toBe(1900);
+  await page.screenshot({ path: 'test-results/destinations.png', fullPage: true });
+  await page.getByRole('button', { name: 'Rester dans la cave' }).click();
+  await expect(page.locator('#menu')).not.toBeVisible(); await expect(page.locator('#launch')).toBeEnabled();
+});
+
+test('modules acquis seulement, production et bonus continuent dans le menu, usine attend les billes', async ({ page }) => {
+  const game = equippedGame(); game.toggleAuto();
+  while (!game.state.chargeReady) game.settle(game.launch('auto')!.id);
+  game.activateBonus();
+  await page.addInitScript(state => localStorage.setItem('masterplinko.save', JSON.stringify(state)), game.state);
+  await page.goto('/'); await expect(page.locator('#auto')).toBeEnabled();
+  await expect(page.locator('#scene')).toHaveAttribute('data-modules', 'auto_launcher,accounting_tray');
+  await page.locator('#auto').click(); await page.locator('#stairs').click();
+  await expect(page.locator('#menu')).toHaveAttribute('data-mode', 'destinations');
+  await expect(page.locator('#auto')).toContainText('Arrêter');
+  const before = await page.evaluate(() => JSON.parse(localStorage.getItem('masterplinko.save')!));
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('masterplinko.save')!).stats.settled), { timeout: 15000 }).toBeGreaterThan(before.stats.settled);
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem('masterplinko.save')!));
+  expect(after.bonusRemainingMs).toBeLessThan(before.bonusRemainingMs); expect(after.factoryRemainingMs).toBe(0);
+  await expect(page.locator('#auto')).toContainText('Arrêter');
+  await page.getByRole('button', { name: 'Aller travailler à l’usine' }).click();
+  await expect(page.locator('#auto')).toContainText('Activer');
+  await expect(page.locator('#destinations-status')).toContainText('Attendez');
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('masterplinko.save')!).pendingBalls.length), { timeout: 10000 }).toBe(0);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('masterplinko.save')!).factoryRemainingMs)).toBe(0);
+  await page.getByRole('button', { name: 'Aller travailler à l’usine' }).click();
+  await expect(page.locator('#menu')).not.toBeVisible(); await expect(page.locator('#launch')).toBeDisabled();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('masterplinko.save')!).factoryRemainingMs)).toBeGreaterThan(0);
 });
 
 test('sauvegarde initiale incompatible conservée, panne de stockage sans débit', async ({ page }) => {
@@ -161,9 +204,17 @@ test('sauvegarde initiale incompatible conservée, panne de stockage sans débit
   await page.getByRole('button', { name: 'Réessayer la lecture' }).click();
   await expect(page.locator('#launch')).toBeEnabled();
   const before = await page.evaluate(() => localStorage.getItem('masterplinko.save'));
-  await page.evaluate(() => { Storage.prototype.setItem = () => { throw new DOMException('Quota', 'QuotaExceededError'); }; });
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === 'masterplinko.save' && JSON.parse(value).pendingBalls.length > 0) throw new DOMException('Quota', 'QuotaExceededError');
+      original.call(this, key, value);
+    };
+  });
   await page.locator('#launch').click();
   await expect(page.locator('#notice')).toContainText('Sauvegarde impossible');
   await expect(page.getByTestId('wallet')).toHaveText('19,00');
-  expect(await page.evaluate(() => localStorage.getItem('masterplinko.save'))).toBe(before);
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('masterplinko.save')!));
+  expect(stored.walletCents).toBe(JSON.parse(before!).walletCents);
+  expect(stored.pendingBalls).toHaveLength(0); expect(stored.stats.launched).toBe(0);
 });

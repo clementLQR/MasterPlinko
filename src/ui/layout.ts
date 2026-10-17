@@ -23,8 +23,8 @@ export function layout() {
     </aside>
     <section class="machine-area" aria-label="Machine de Plinko">
       <div class="machine-heading"><span class="eyebrow">PIÈCE MAÎTRESSE DE LA CAVE</span><span id="machine-status" class="status"><i></i> EN SERVICE</span></div>
-      <nav class="view-navigation" aria-label="Vues de la cave"><button id="view-plinko" aria-pressed="true">← La machine</button><button id="view-azur" aria-pressed="false">L’établi d’Azur →</button><button id="door">Porte ↗</button></nav>
-      <div id="scene" class="scene"><div class="scene-vignette"></div><div class="plate-stamp">FABRICATION ARTISANALE<br><strong>FIABILITÉ APPROXIMATIVE</strong></div><div class="inflight"><span id="ball-count">0</span> / 50 <span>BILLES</span></div></div>
+      <nav class="view-navigation" aria-label="Vues de la cave"><button id="view-plinko" aria-pressed="true">← La machine</button><button id="view-azur" aria-pressed="false">L’établi d’Azur →</button><button id="stairs">Sortir de la cave ↗</button></nav>
+      <div id="scene" class="scene"><div class="scene-vignette"></div><div id="scene-hint" class="scene-hint" hidden></div><div class="plate-stamp">SOUS LE CHALET DE PAPY<br><strong>QUELQUES PIÈCES AU CHAUD.</strong></div><div class="inflight"><span id="ball-count">0</span> / 50 <span>BILLES</span></div></div>
       <div class="controls"><div class="bet-control"><label for="bet-value" class="eyebrow">MISE PAR BILLE</label><div class="stepper"><button id="bet-down" aria-label="Diminuer la mise">−</button><output id="bet-value">1,00</output><button id="bet-up" aria-label="Augmenter la mise">+</button></div></div><button id="launch" class="launch-button">Lancer une bille ${icons.arrow}</button><div class="shortcut"><kbd>ESPACE</kbd><span>ou juste un clic</span></div></div>
       <div class="bench-caption"><span>Les achats se font dans l’atelier. La machine continue son travail.</span><button id="bench-back">← Revenir au Plinko <kbd>ÉCHAP</kbd></button></div>
       <div id="notice" class="notice" role="status" aria-live="polite">La machine vous attend. La prudence aussi.</div>

@@ -21,7 +21,7 @@ Un projet Vite + TypeScript + Three.js + HTML/CSS, jouable sur ordinateur en loc
 Code et 3D procédurale réalisés par toi, sans exiger du créateur une modélisation manuelle.
 Une machine de Plinko et un établi stylisés dans un petit décor de cave, éclairage soigné, avec deux cadrages prédéfinis et des transitions courtes. Pas de déplacement libre.
 Objets cliquables, flèches discrètes, accès directs et retour à la machine par Échap. Respecter les priorités des fenêtres modales et le mode de mouvement réduit.
-La production et les billes continuent pendant les achats et transitions. La porte ouvre l'action d'usine sans exiger un troisième cadrage.
+La production et les billes continuent pendant les achats, transitions et menu des destinations. L’escalier à gauche ouvre le choix des sorties, sans déplacement ni service automatique. Les visites extérieures non implémentées sont explicitement indisponibles ; aucun troisième cadrage n’est imposé.
 Les résultats sont prédéterminés ; les trajectoires doivent être crédibles et rejoindre la bonne sortie. Pas de Rapier obligatoire pour ce développement initial.
 
 ## Règles impératives
@@ -49,7 +49,7 @@ Aucun revenu hors ligne, compte, serveur ou base SQL.
 - Corriger les erreurs dans le périmètre et conserver une version jouable.
 
 ## Direction artistique
-Bois, métal usé, vis, câbles, bouton mécanique, compteurs ; lumière chaude et fond plus sombre.
+Lofi numérique, selon les références visuelles du créateur : vraie cave 3D en pierre irrégulière, plafond bas à poutres, sol ancien, tapis, rangements, outils, bûches, escalier en bois et établi. Fenêtre haute sur une nuit pluvieuse bleutée ; ampoule suspendue et lampe d’établi chaudes. Machine contre le mur de pierre : bois clair, plateau crème, sauge, rose poudré et lavande, écrans à pixels, compteur lumineux et gros bouton physique. Modules 3D indépendants selon les acquisitions ; les modèles des modules futurs restent cachés et n’ajoutent aucune mécanique.
 Humour absurde joué sérieusement, descriptions courtes.
 Pas de prénom pour Papy.
 Éviter un habillage de site marketing, les cartes génériques envahissantes ou les effets qui cachent le plateau.

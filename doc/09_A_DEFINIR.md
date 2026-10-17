@@ -17,7 +17,10 @@
 | Nom du grand-père d’Ewen | Papy |
 | Gestion des fichiers | Modifier les fichiers et dossiers existants, sans variantes numérotées |
 | Navigation | Positions de caméra fixes, transitions courtes, accès directs ; pas de déplacement libre |
-| Vues initiales | Plinko et établi d'Azur ; porte accessible comme action |
+| Vues initiales | Plinko et établi d’Azur ; escalier cliquable pour les destinations extérieures |
+| Direction artistique | Lofi numérique ; cave en pierre sous le chalet, bois clair, crème et pastels ; lumières intérieure chaude et extérieure bleutée |
+| Modules visuels | Objets 3D indépendants ; afficher seulement les acquisitions existantes, sans développer les mécaniques futures |
+| Destinations | Escalier avec menu sans pause de production ; visites futures explicitement indisponibles ; usine sur sélection seulement |
 
 ## Compléments de travail délégués à l'assistant
 Ces choix rendent le développement initial implémentable ; ils restent ajustables après essai.

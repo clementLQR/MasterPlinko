@@ -29,12 +29,20 @@ const sound = new Sound();
 const navigation = new Navigation();
 const dialog = get<HTMLDialogElement>('menu');
 
-try { scene = new PlinkoScene(get('scene'), navigation, view => { if (view === 'door') openDoor(); else navigate(view); }); }
+try { scene = new PlinkoScene(get('scene'), navigation, action => {
+  if (action === 'stairs') openDestinations();
+  else if (action === 'launch') launch();
+  else if (action === 'history') get('history').click();
+  else navigate(action);
+}); }
 catch { renderingError = 'Le rendu 3D est indisponible. Activez l’accélération graphique du navigateur, puis rechargez la page.'; get('scene').insertAdjacentHTML('beforeend', `<p class="render-error">${renderingError}</p>`); }
 
-function openMenu(content: string) {
+function openMenu(content: string, blocking = true) {
+  if (dialog.open) dialog.close();
+  dialog.dataset.mode = blocking ? 'blocking' : 'destinations';
   get('menu-content').innerHTML = content;
-  if (!dialog.open) dialog.showModal();
+  if (blocking) dialog.showModal(); else dialog.show();
+  render();
 }
 
 async function load() {
@@ -67,7 +75,7 @@ function render() {
   const s = game.state;
   const blocked = !game.writable || !!game.error || !!bootProblem || !!renderingError;
   const broken = isBroken(s), factory = s.factoryRemainingMs > 0;
-  const manualBlocked = blocked || !navigation.atMachine;
+  const manualBlocked = blocked || !navigation.atMachine || dialog.open;
   get('app').dataset.view = navigation.target;
   get('app').dataset.moving = String(navigation.moving);
   get('view-plinko').setAttribute('aria-pressed', String(navigation.target === 'plinko'));
@@ -100,7 +108,7 @@ function render() {
   disabled('discharge', manualBlocked || factory || broken || !s.chargeReady || s.bonusRemainingMs > 0);
   get('charge-back').hidden = navigation.target !== 'azur' || !s.chargeReady;
   get('discharge').classList.toggle('ready', s.chargeReady);
-  get('factory').innerHTML = factory ? `Service en cours · ${Math.ceil(s.factoryRemainingMs / 1000)} s` : `Aller travailler <span>↗</span>`;
+  get('factory').innerHTML = factory ? `Service en cours · ${Math.ceil(s.factoryRemainingMs / 1000)} s` : `Choisir une destination <span>↗</span>`;
   disabled('factory', blocked || factory);
   get('factory-note').textContent = factory ? 'Le salaire sera versé à la fin du service.' : s.pendingBalls.length ? 'Arrête le Doigt. Attendez les billes, puis réessayez.' : 'Le salaire tombe, même quand les billes non.';
   get('factory-fill').parentElement!.hidden = !factory;
@@ -117,12 +125,14 @@ function render() {
   get('notice').textContent = renderingError || (waiting ? 'Cette cave est déjà ouverte ailleurs. Cet onglet attend la fermeture de l’autre pour reprendre la partie.' : '') || bootProblem || game.error || game.notice || (s.walletCents < s.selectedBetCents ? 'Fonds insuffisants pour cette mise. Réduisez-la ou faites un service à l’usine.' : 'La machine vous attend. La prudence aussi.');
   get('notice').classList.toggle('notice-warning', blocked || broken);
   get('save-status').textContent = waiting ? 'Onglet en attente' : blocked ? 'Partie suspendue' : '● Sauvegarde locale';
+  const work = dialog.querySelector<HTMLButtonElement>('[data-action="work"]');
+  if (work) work.disabled = blocked || factory;
 }
 
 get('upgrades').innerHTML = (Object.keys(UPGRADES) as UpgradeId[]).map((id, i) => `<article class="upgrade"><div class="upgrade-icon">${[icons.tool, icons.bolt, icons.book][i]}</div><div class="upgrade-info"><h3>${UPGRADES[id].name}</h3><p>${UPGRADES[id].description}</p><button data-buy="${id}" disabled>À débloquer</button></div></article>`).join('');
 
 function navigate(view: View) {
-  if (dialog.open) return;
+  if (dialog.open) { if (dialog.dataset.mode === 'destinations') dialog.close(); else return; }
   navigation.go(view, game.state.preferences.reducedMotion);
   render();
   scene?.frame(game.state, 0, false, () => false);
@@ -132,11 +142,12 @@ get('view-azur').addEventListener('click', () => navigate('azur'));
 get('visit-azur').addEventListener('click', () => navigate('azur'));
 get('bench-back').addEventListener('click', () => navigate('plinko'));
 get('charge-back').addEventListener('click', () => navigate('plinko'));
-function openDoor() {
+function openDestinations() {
   if (navigation.moving) return;
-  openMenu('<h2>La porte de la cave.</h2><p>Dehors, une usine recrute encore. Un service de 15 secondes actives rapporte 15 pièces garanties.</p><p>Le Doigt mécanique sera arrêté. S’il reste des billes, attendez leur arrivée avant de partir.</p><div class="dialog-actions"><button data-action="work">Commencer un service à l’usine</button></div>');
+  const azur = game.state.repairTriggered ? 'Azur est rencontré. Les visites extérieures ne sont pas encore disponibles.' : 'Disponible après la rencontre d’Azur ; visite extérieure à venir.';
+  openMenu(`<span class="eyebrow">AU PIED DE L’ESCALIER</span><h2>Sortir de la cave.</h2><p>La pluie n’a pas l’air pressée de s’arrêter. Où aller ?</p><div class="destinations"><button data-action="work"><strong>Aller travailler à l’usine <span>↗</span></strong><small>15 secondes actives · 15 pièces garanties</small></button><button disabled><strong>Rendre visite à Azur</strong><small>${azur}</small></button><button disabled><strong>Rendre visite à Marceau</strong><small>Rencontre à venir · destination indisponible.</small></button><button disabled><strong>Rendre visite à Matéo</strong><small>Rencontre à venir · destination indisponible.</small></button><button data-action="stay"><strong>Rester dans la cave <span>↙</span></strong><small>On est bien, ici.</small></button></div><p id="destinations-status" role="status">La machine continue de tourner. Seul le choix de l’usine arrête le lanceur ; attendez ensuite les billes avant de partir.</p>`, false);
 }
-get('door').addEventListener('click', openDoor);
+get('stairs').addEventListener('click', openDestinations);
 function launch() { if (!navigation.atMachine || dialog.open) return; sound.unlock(); if (game.launch()) sound.play('launch', game.state.preferences.sound); render(); }
 get('launch').addEventListener('click', launch);
 get('bet-down').addEventListener('click', () => { game.setBet(game.state.selectedBetCents - 100); render(); });
@@ -149,11 +160,15 @@ get('upgrades').addEventListener('click', event => {
   render();
 });
 get('auto').addEventListener('click', () => { game.toggleAuto(); render(); });
-get('factory').addEventListener('click', () => { game.startFactory(); render(); });
+get('factory').addEventListener('click', openDestinations);
 get('discharge').addEventListener('click', () => { if (navigation.atMachine) game.activateBonus(); render(); });
 document.addEventListener('keydown', event => {
   const target = event.target as HTMLElement;
-  if (event.key === 'Escape' && !dialog.open && !['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) { event.preventDefault(); navigate('plinko'); return; }
+  if (event.key === 'Escape' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) {
+    event.preventDefault();
+    if (dialog.open) dialog.close(); else navigate('plinko');
+    render(); return;
+  }
   if (event.code === 'Space' && !event.repeat && !dialog.open && !document.hidden && !['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'SUMMARY', 'A'].includes(target.tagName)) { event.preventDefault(); if (!get<HTMLButtonElement>('launch').disabled) launch(); }
 });
 
@@ -170,6 +185,10 @@ get('history').addEventListener('click', () => {
 });
 get('probabilities').addEventListener('click', () => openMenu(`<h2>Un peu de mécanique.</h2><p>La catégorie est tirée au lancement, puis la bille rejoint sa sortie. Pour les sorties doubles, chaque côté a la moitié de la probabilité de sa catégorie.</p><table><thead><tr><th>Retour total</th><th>Probabilité</th></tr></thead><tbody>${OUTCOMES.map(o => `<tr><td>${multiplier(o.multiplier)}</td><td>${(o.weight / 10).toLocaleString('fr-FR')} %</td></tr>`).join('')}</tbody></table><p>Retour moyen théorique hors bonus : 1,06 fois la base. Ce calcul ne garantit aucun gain individuel. Les résultats ne dépendent ni du solde ni des pertes passées.</p>`));
 get('close-menu').addEventListener('click', () => dialog.close());
+dialog.addEventListener('close', () => render());
+document.addEventListener('pointerdown', event => {
+  if (dialog.open && dialog.dataset.mode === 'destinations' && !dialog.contains(event.target as Node)) dialog.close();
+});
 dialog.addEventListener('click', event => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close(); } });
 dialog.addEventListener('change', event => {
   const input = event.target as HTMLInputElement;
@@ -186,7 +205,12 @@ function exportSave() {
 dialog.addEventListener('click', event => {
   const action = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-action]')?.dataset.action;
   if (action === 'export') exportSave();
-  if (action === 'work') { game.startFactory(); dialog.close(); render(); }
+  if (action === 'stay') dialog.close();
+  if (action === 'work') {
+    if (game.startFactory()) dialog.close();
+    else { const status = get('destinations-status'); if (status) status.textContent = game.notice || game.error; }
+    render();
+  }
   if (action === 'import') get<HTMLInputElement>('import-file').click();
   if (action === 'reload' && acquired) { dialog.close(); void load(); }
   if (action === 'retry') { if (game.retrySave()) dialog.close(); render(); }
@@ -215,7 +239,7 @@ get<HTMLInputElement>('import-file').addEventListener('change', async event => {
 let lastTime = performance.now(), lastRender = 0;
 function frame(now: number) {
   const delta = Math.min(1000, Math.max(0, now - lastTime)); lastTime = now;
-  const active = !document.hidden && !dialog.open && game.writable && !game.error && !bootProblem && !renderingError;
+  const active = !document.hidden && (!dialog.open || dialog.dataset.mode === 'destinations') && game.writable && !game.error && !bootProblem && !renderingError;
   game.advance(delta, active);
   if (!document.hidden) scene?.frame(game.state, delta, active, id => {
     const result = game.settle(id);

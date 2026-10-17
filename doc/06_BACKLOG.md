@@ -7,6 +7,7 @@ Les identifiants restent stables lorsque les tâches changent de statut.
 ## État du développement
 - **MP-001 à MP-009 et MP-033 : implémentés et vérifiés techniquement.** Build et contrôle TypeScript réussis ; tests de logique et parcours Chrome. Machine et établi procéduraux, économie, achats, Surchauffe, usine et import/export fonctionnent. Voir le compte rendu du fichier 07.
 - **MP-010 : à faire.** Session de 10 à 15 minutes et retours du créateur sur le rythme et la lisibilité. Les parcours automatisés ne remplacent pas cette session.
+- **MP-034 et MP-035 : implémentés et vérifiés techniquement.** Cave lofi et modules conditionnels ; escalier avec menu non bloquant, visites indisponibles explicites et accès à l’usine sur sélection.
 - Les systèmes futurs P1 à P3 restent à développer ; certains éléments simples du chalet et retours audiovisuels sont présents dans le prototype.
 
 ## P0 — Prototype
@@ -23,6 +24,8 @@ Les identifiants restent stables lorsque les tâches changent de statut.
 | MP-009 | Sauvegarde et export/import | Résultats en vol conservés et réglés une fois ; version validée ; pas de production hors ligne |
 | MP-010 | Session de test | Une partie de 10–15 min et ses principaux problèmes sont consignés |
 | MP-033 | Navigation par vues fixes | Plinko/établi, clic et clavier, retours directs, transitions réduites et aucun arrêt de production |
+| MP-034 | Direction artistique lofi et modules 3D | Cave en pierre aménagée, nuit pluvieuse, éclairages chaud/bleu, Plinko crème/pastel ; modules selon les achats, aucun système futur ajouté |
+| MP-035 | Sorties par l’escalier | Survol/clic et accès clavier ; menu sans départ automatique ; production continue et restrictions d’usine conservées |
 
 ## P1 — Première expérience complète
 | ID | Fonctionnalité | Terminé quand… |

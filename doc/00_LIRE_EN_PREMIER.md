@@ -49,7 +49,7 @@ Le créateur essaie le jeu, évalue le rendu et le rythme, puis formule ses reto
 Le jeu se lance en localhost avec les commandes du [README](../README.md). L’essai de 10 à 15 minutes par le créateur reste à faire.
 
 ## Navigation validée
-Positions de caméra fixes dans la pièce, sans marche libre. Développement initial : Plinko et établi, porte accessible, transitions courtes et retour direct. La production continue pendant les achats et la navigation. Règles détaillées dans les fichiers 04 et 11.
+Positions de caméra fixes dans la pièce, sans marche libre. Plinko et établi, escalier cliquable pour les destinations extérieures, transitions courtes et retour direct. La production continue pendant les achats, la navigation et le menu des destinations. Cave en pierre lofi numérique et machine crème/pastel selon les références du créateur. Règles détaillées dans les fichiers 04 et 11.
 
 
 ## Gestion des documents

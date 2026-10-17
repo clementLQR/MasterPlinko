@@ -69,7 +69,7 @@ Aucun revenu hors ligne. Masquer l'onglet met en pause animation, cadence, usine
 Détail des garanties et limites : fichiers 10 et 11.
 
 ## Interface
-Direction finale : compteur sur la machine, atelier, porte, téléphone, carnet.
+Direction finale : compteur sur la machine, atelier, escalier de sortie, téléphone, carnet.
 Développement initial : privilégier la machine et des panneaux HTML/CSS lisibles, même si certaines fonctions restent provisoirement à l'écran.
 Ne pas sacrifier l'accès à l'usine, au solde ou à la mise pour respecter le décor.
 
@@ -82,7 +82,7 @@ Le chalet est une pièce 3D avec plusieurs cadrages prédéfinis. Cliquer sur un
 | Établi d'Azur | Réparation et achats | À développer maintenant |
 | Coin de Marceau | Produits et recherches | Plus tard |
 | Table de Matéo | Porte-bonheur | Plus tard |
-| Porte | Choix de destination, dont l'usine | Action accessible dans le développement initial, sans troisième cadrage obligatoire |
+| Escalier | Menu des destinations extérieures, dont l’usine | Objet cliquable et commande directe ; aucun troisième cadrage obligatoire |
 
 - Deux vues Développement initial : Plinko et établi, dans une même scène.
 - Objets cliquables, flèches discrètes et accès direct aux vues disponibles. Aucun passage obligatoire par plusieurs cadrages.
@@ -93,6 +93,8 @@ Le chalet est une pièce 3D avec plusieurs cadrages prédéfinis. Cliquer sur un
 - Une notification de Décharge prête propose un retour direct à la machine depuis l'établi.
 - Une nouvelle partie ou un chargement commence en vue Plinko.
 - L'usine conserve ses règles de pause et d'arrêt du lanceur ; elle n'est pas un simple changement de caméra.
+- L’ouverture du menu de l’escalier laisse tourner billes, production et Surchauffe. Aucun service ne commence à l’ouverture. Le choix explicite de l’usine arrête le lanceur ; s’il reste des billes, attendre leur règlement puis sélectionner à nouveau la destination.
+- Azur, Marceau et Matéo figurent comme visites indisponibles tant que la rencontre ou la fonctionnalité correspondante manque. Rester dans la cave ferme le menu, sans autre effet.
 
 L'établi peut être observé dès le début ; ses achats restent verrouillés selon la progression. La réparation apparaît à la panne, puis ouvre les autres achats.
 Les vues des futurs personnages se débloquent avec leur rencontre. Le déplacement libre ne sera reconsidéré que si une vraie mécanique d'exploration le justifie.

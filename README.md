@@ -31,10 +31,13 @@ Le build produit `dist/`. L’aperçu de production utilise l’adresse indiqué
 - Une panne unique arrive à **50 pièces de retours cumulés du Plinko**. L’établi propose une réparation à **25 pièces** une fois les billes réglées. Il ouvre ensuite le **Doigt mécanique** (40 pièces) et le **Bac comptable** (15 pièces).
 - Le Doigt, activé manuellement, produit une bille gratuite de base 1 toutes les 2 secondes. Il continue à l’établi ; la mise sélectionnée n’affecte pas les billes gratuites.
 - Après 100 règlements, une **Décharge** peut être activée en vue Plinko : retours ×10 sur les billes lancées pendant 10 secondes actives. Une notification à l’établi permet de revenir directement.
-- **Aller travailler** ou la **porte** donne accès à un service de 15 secondes actives pour 15 pièces garanties. Il arrête le Doigt et nécessite zéro bille en cours. L’usine reste disponible pendant la panne.
+- L’**escalier à gauche** et **Sortir de la cave** ouvrent les destinations sans interrompre le jeu. **Rester dans la cave** ferme le menu. Les visites à Azur, Marceau et Matéo sont indiquées comme indisponibles tant que leur fonctionnalité ou leur rencontre manque.
+- Sélectionner **Aller travailler à l’usine** arrête le Doigt et demande zéro bille en cours. S’il en reste, attendre leur arrivée puis sélectionner à nouveau l’usine. Le service de 15 secondes actives rapporte 15 pièces garanties et reste accessible pendant la panne. Ouvrir le menu ne commence aucun service.
 - La roue des **réglages** permet de couper le son, réduire les animations, alléger le rendu et exporter/importer une partie. Les sons sont désactivés au départ.
 
-La caméra et les achats ne suspendent pas la production. Les dialogues bloquants et les onglets masqués suspendent le jeu. Il n’y a aucun revenu hors ligne. Le Doigt attend toujours une activation explicite après chargement ou import.
+La caméra, les achats et le menu des destinations ne suspendent pas la production. Les dialogues bloquants et les onglets masqués suspendent le jeu. Il n’y a aucun revenu hors ligne. Le Doigt attend toujours une activation explicite après chargement ou import.
+
+La cave lofi est entièrement construite en 3D : maçonnerie, poutres, fenêtre pluvieuse, luminaires, établi, escalier, tapis et rangements. La machine en bois clair et crème porte des touches sauge, rose et lavande. Le Doigt mécanique et le Bac comptable apparaissent sur leurs emplacements 3D à l’achat, y compris sur les sauvegardes existantes. Les modèles de duplicateur, compteur d’instabilité et ventilation sont préparés mais restent cachés ; leurs mécaniques ne sont pas implémentées.
 
 ## Sauvegarde
 
