@@ -7,7 +7,10 @@ import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { finishSurface, wovenRug } from './decor';
-import type { Preferences } from '../game/state';
+import type { GameState, Preferences } from '../game/state';
+import { purchaseIssue } from '../game/plans';
+import { UPGRADES } from '../config';
+import type { UpgradeId } from '../config';
 import { AZUR_POSES, AzurNavigation } from '../navigation/shop';
 import type { AzurView } from '../navigation/shop';
 import { AzurWorkshop } from './shopWorkshop';
@@ -49,6 +52,12 @@ export class AzurShop {
   private privateAccess = false;
   private doorLeaf!: THREE.Group;
   private workshop: AzurWorkshop;
+  private bookFocusAction?: string;
+  private bookAnnouncement = false;
+  private purchaseState?: GameState;
+  private canPurchase = false;
+  private quote!: THREE.Mesh;
+  private quoteKey = '';
   private get view() { return this.journey.view; }
   private get progress() { return this.journey.moving ? 0 : 1; }
   private rain: THREE.LineSegments;
@@ -70,7 +79,7 @@ export class AzurShop {
     for (let y = 4; y < 128; y += 8) for (let x = 4; x < 128; x += 8) { c.beginPath(); c.arc(x, y, 2, 0, Math.PI * 2); c.fill(); }
   }) });
 
-  constructor(private element: HTMLElement, private announce: (text: string) => void, private leave: () => void) {
+  constructor(private element: HTMLElement, private announce: (text: string) => void, private leave: () => void, private buyPlan?: (id: UpgradeId) => boolean) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'low-power' });
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -337,7 +346,7 @@ export class AzurShop {
     for (let i = 0; i < 5; i++) { this.cylinder(circuit, 0.015, 0.05, -0.13 + i * 0.06, 0.08, -0.06, this.brass); this.box(circuit, 0.04, 0.025, 0.045, -0.13 + i * 0.06, 0.07, 0.04, this.iron); }
     const lid = this.box(this.root, 0.37, 0.05, 0.25, 0.12, 1.15, -0.4, this.cream); lid.rotation.y = -0.2;
     this.tool(this.root, 'driver', 0.1, 1.14, -0.1, 0.7, -Math.PI / 2);
-    this.paperwork(this.root, -1.1, 1.132, 0.12, 0.42, 0.3, -0.14);
+    this.repairQuote();
     this.mug(this.root, 1.1, 1.12, -0.45);
     this.accessory(this.root, 'camera', -2.95, 1.12, -0.55, 0.7);
     this.rod(this.root, [-0.58, 1.15, -0.16], [-0.34, 1.15, -0.05], 0.014, this.brass);
@@ -347,6 +356,42 @@ export class AzurShop {
     this.plaque(board, 0.62, 0.82, 0, 0.47, 0, ['Petites', 'réparations,', 'grandes', 'idées.']);
     for (const x of [-0.36, 0.36]) this.box(board, 0.06, 1.0, 0.07, x, 0.5, -0.03, this.wood);
     this.rod(board, [-0.33, 0.85, -0.03], [-0.33, 0.03, -0.5], 0.025, this.wood);
+  }
+  private repairQuote() {
+    const stand = this.group(-1.1, 1.30, 0.16); stand.name = 'azur:repair-plan'; stand.rotation.x = -Math.PI / 3;
+    this.box(stand, 0.89, 0.63, 0.025, 0, 0, 0, this.sage);
+    this.quote = this.art(stand, 0.85, 0.59, 0, 0, 0.016, () => {});
+    this.register(stand, 'repair-plan', 'Consulter le plan de réparation — 25,00 pièces', [-1.1, 1.52, 0.16]);
+    for (const [action, y, label] of [['buy-repair-plan', -0.11, 'Acheter le plan de réparation'], ['quote-close', -0.24, 'Revenir au comptoir']] as const) {
+      const hit = new THREE.Mesh(new THREE.PlaneGeometry(0.77, 0.105), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+      hit.position.set(0, y, 0.019); stand.add(hit);
+      this.register(hit, action, label, [-1.1, 1.52, 0.16], ['devis']);
+    }
+  }
+  private purchaseLabel(id: UpgradeId) {
+    return !this.canPurchase ? 'Partie suspendue' : this.purchaseState ? purchaseIssue(this.purchaseState, id) ?? 'Acheter le plan' : 'Consulter chez Azur';
+  }
+  setPurchaseState(state: GameState, canWrite: boolean) {
+    this.purchaseState = state; this.canPurchase = canWrite && !!this.buyPlan;
+    const id = this.workshop.notebook.planId;
+    this.workshop.notebook.setOrder(id ? this.purchaseLabel(id) : '', !!id && this.purchaseLabel(id) === 'Acheter le plan');
+    const label = this.purchaseLabel('azur.initial_repair'), key = `${label}/${state.walletCents}`;
+    if (key === this.quoteKey) return;
+    this.quoteKey = key; this.focus(); this.refreshPointer = true;
+    const material = this.quote.material as THREE.MeshStandardMaterial; material.map?.dispose();
+    material.map = map(1200, 833, c => {
+      c.fillStyle = '#e4d7b7'; c.fillRect(0, 0, 1200, 833); c.fillStyle = '#3e564a'; c.font = 'bold 58px Georgia';
+      c.fillText('AZUR · PLAN DE RÉPARATION', 55, 95, 1090);
+      c.font = '37px monospace'; c.fillText('Pour le MasterPlinko de Papy', 55, 170);
+      c.fillText('25,00 pièces · paiement unique', 55, 250);
+      c.fillText('À installer dans la cave, sur la', 55, 323); c.fillText('trappe de montage du Plinko.', 55, 375);
+      c.fillText(`Solde : ${(state.walletCents / 100).toFixed(2).replace('.', ',')} pièces`, 55, 455);
+      c.fillStyle = label === 'Acheter le plan' ? '#bdcba5' : '#c7bfa7'; c.fillRect(55, 500, 1090, 155);
+      c.fillStyle = '#354b40'; c.font = 'bold 40px monospace'; c.fillText(label, 80, 570, 1040);
+      if (state.plans.includes('azur.initial_repair')) { c.font = '30px monospace'; c.fillText('Échap puis sortie : rentrer installer le plan.', 80, 625, 1030); }
+      c.font = '36px monospace'; c.fillText('← Revenir au comptoir', 80, 755);
+    }); material.needsUpdate = true;
+    const target = this.targets.find(o => o.userData.action === 'buy-repair-plan'); if (target) target.userData.label = `Réparation initiale — ${label}`;
   }
   private tool(g: THREE.Object3D, kind: 'driver' | 'pliers' | 'spanner', x: number, y: number, z: number, s = 1, rotation = 0) {
     const t = this.group(x, y, z, g); t.scale.setScalar(s); t.rotation.x = rotation;
@@ -575,7 +620,7 @@ export class AzurShop {
       const mesh = new THREE.Mesh(geometry, material); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh);
     }
   }
-  reset() { this.journey.reset(); this.pointer = undefined; this.focus(); this.element.dataset.view = 'entrance'; }
+  reset() { this.journey.reset(); this.workshop.notebook.reset(); this.bookFocusAction = undefined; this.bookAnnouncement = false; this.pointer = undefined; this.focus(); this.syncNotebook(); this.element.dataset.view = 'entrance'; }
   setPrivateAccess(allowed: boolean) { if (this.privateAccess !== allowed) this.focus(); this.privateAccess = allowed; }
   setActive(active: boolean, preferences: Preferences) {
     this.active = active; this.reduced = preferences.reducedMotion;
@@ -595,43 +640,79 @@ export class AzurShop {
   back() {
     if (this.journey.moving) return;
     if (this.view === 'entrance') { this.focus(); this.leave(); }
+    else if (this.view === 'devis') this.go('counter');
     else if (this.view === 'counter' || this.view === 'backroom' || this.view === 'discovery') this.go('entrance');
-    else this.go(this.view === 'workshop' ? 'backroom' : 'workshop');
+    else this.go(this.view === 'workshop' ? 'entrance' : 'workshop');
   }
   private go(view: AzurView, immediate = this.reduced) {
+    const fromPublic = this.journey.inPublic;
     if (!this.journey.go(view, this.privateAccess)) return;
+    this.workshop.notebook.finish(); this.bookFocusAction = undefined; this.bookAnnouncement = false; this.syncNotebook();
     if (immediate) this.journey.advance(0, true);
     this.refreshPointer = true; this.focus(); this.element.dataset.view = view;
-    const descriptions: Record<AzurView, string> = { entrance: 'Boutique d’Azur. Échap quitte la boutique.', counter: 'Comptoir d’Azur. Échap revient à l’entrée.', backroom: 'Réserve d’Azur. Appareils à réparer, pièces détachées et une radio. Échap retourne à la boutique.', discovery: 'L’étagère a dégagé un passage. Sélectionnez le passage pour entrer dans l’atelier.', workshop: 'Atelier caché d’Azur. MasterPlinko hors service au centre, prototypes sur les établis. Échap revient à la réserve.', machine: 'MasterPlinko cassé : capot ouvert, câbles débranchés et panneau démonté. Aucune mise en marche.', prototypes: 'Prototypes du Doigt mécanique et du Bac comptable. Objets d’essai, aucun achat ni déblocage.', duplicator: 'Duplicateur expérimental sous cloche. Prototype décoratif, aucune acquisition.' };
-    this.announce(descriptions[view]);
+    const descriptions: Record<AzurView, string> = { entrance: 'Boutique d’Azur. Le plan de réparation est au comptoir. Échap quitte la boutique.', counter: 'Comptoir d’Azur. Sélectionnez le devis de réparation. Échap revient à l’entrée.', devis: 'Plan de réparation : 25,00 pièces. Acheter ici, puis installer sur la trappe de montage du Plinko. Échap revient au comptoir.', backroom: 'Réserve d’Azur. Appareils à réparer, pièces détachées et une radio. Échap retourne à la boutique.', discovery: 'L’étagère a dégagé un passage. Sélectionnez le passage pour entrer dans l’atelier.', workshop: 'Atelier caché d’Azur. MasterPlinko hors service au centre, prototypes sur les établis et carnet des plans à droite. Échap retourne directement dans la boutique.', machine: 'MasterPlinko cassé : capot ouvert, câbles débranchés et panneau démonté. Aucune mise en marche.', prototypes: 'Prototypes du Doigt mécanique et du Bac comptable. Objets d’essai, aucun achat ni déblocage.', duplicator: 'Duplicateur expérimental sous cloche. Prototype décoratif, aucune acquisition.', plans: this.bookDescription() };
+    this.announce(this.journey.moving && view === 'workshop' && fromPublic ? 'Trajet automatique vers l’atelier : ouverture de la porte, du passage secret et entrée sans autre clic.' : this.journey.moving && view === 'entrance' && !fromPublic ? 'Retour automatique dans la boutique.' : descriptions[view]);
   }
   private act(target: THREE.Object3D) {
     if (!this.active || this.progress < 1) return;
-    if (target.userData.action === 'counter') this.go(this.view === 'counter' ? 'entrance' : 'counter');
+    if (this.workshop.notebook.turning) return;
+    if (target.userData.action === 'plans-next') this.turnNotebook(1);
+    else if (target.userData.action === 'plans-previous') this.turnNotebook(-1);
+    else if (target.userData.action === 'plans-close') this.go('workshop');
+    else if (target.userData.action === 'repair-plan') this.go('devis');
+    else if (target.userData.action === 'quote-close') this.go('counter');
+    else if (target.userData.action === 'buy-repair-plan') this.orderPlan('azur.initial_repair');
+    else if (target.userData.action === 'plans-buy' && this.workshop.notebook.planId) this.orderPlan(this.workshop.notebook.planId);
+    else if (target.userData.action === 'counter') this.go(this.view === 'counter' ? 'entrance' : 'counter');
     else if (target.userData.action === 'entrance') { this.focus(); this.leave(); }
     else if (target.userData.action === 'backroom') {
-      if (this.journey.inPublic && !this.privateAccess) this.announce('Accès privé fermé. La réparation initiale doit être achetée dans le catalogue.');
-      else this.go(this.journey.inPublic ? 'backroom' : 'entrance');
-    } else if (target.userData.action === 'secret-switch') {
-      if (!this.journey.secretOpen) this.go('discovery'); else this.announce('Le passage est déjà ouvert.');
-    } else if (target.userData.action === 'enter-workshop') this.go('workshop');
-    else if (target.userData.action === 'return-backroom') this.go('backroom');
-    else if (target.userData.action === 'return-shop') this.go('entrance');
-    else if (['machine', 'prototypes', 'duplicator'].includes(target.userData.action)) this.go(this.view === target.userData.action ? 'workshop' : target.userData.action as AzurView);
+      if (this.journey.inPublic && !this.privateAccess) this.announce('Accès privé fermé. Achetez le plan au comptoir, puis installez la réparation sur le Plinko dans la cave.');
+      else this.go(this.journey.inPublic ? 'workshop' : 'entrance');
+    } else if (target.userData.action === 'return-shop') this.go('entrance');
+    else if (['machine', 'prototypes', 'duplicator', 'plans'].includes(target.userData.action)) this.go(this.view === target.userData.action ? 'workshop' : target.userData.action as AzurView);
+  }
+  private orderPlan(id: UpgradeId) {
+    const label = this.purchaseLabel(id);
+    if (label !== 'Acheter le plan') { this.announce(`${UPGRADES[id].name} — ${label}`); return; }
+    const bought = this.buyPlan?.(id);
+    this.announce(bought ? `Plan ${UPGRADES[id].name} acheté. Retournez dans la cave et utilisez la trappe de montage du Plinko.` : 'Achat refusé. Vérifiez la sauvegarde avant de réessayer.');
+  }
+  private bookDescription() {
+    const book = this.workshop.notebook;
+    return `Carnet d’Azur — double page ${book.page} sur ${book.count}. ${book.description} Coins des pages ou flèches gauche/droite pour feuilleter ; signet ou Échap pour revenir à l’atelier. ${book.planId ? `Plan : ${(UPGRADES[book.planId].price / 100).toFixed(2)} pièces. ${this.purchaseLabel(book.planId)}. Montage dans la cave après achat.` : 'Étude : prix à définir, aucun achat disponible.'}`;
+  }
+  private syncNotebook() {
+    const book = this.workshop.notebook;
+    if (!this.purchaseState) book.setOrder('Consultation du plan', false);
+    this.element.dataset.planPage = String(book.page); this.element.dataset.planCount = String(book.count);
+    this.element.dataset.planTitle = book.title; this.element.dataset.pageTurning = String(book.turning);
+  }
+  private turnNotebook(direction: number) {
+    if (this.view !== 'plans' || this.progress < 1 || !this.workshop.notebook.turn(direction, this.reduced)) return;
+    this.bookFocusAction = this.pointer ? undefined : direction > 0 ? 'plans-next' : 'plans-previous';
+    this.focus(); this.refreshPointer = true; this.syncNotebook();
+    if (this.reduced) this.finishedBookTurn();
+  }
+  private finishedBookTurn() {
+    if (this.purchaseState) this.setPurchaseState(this.purchaseState, this.canPurchase);
+    this.syncNotebook(); this.refreshPointer = true;
+    if (this.bookFocusAction) this.focus(this.targets.find(o => o.userData.action === this.bookFocusAction && this.allowed(o)) ?? this.targets.find(o => o.userData.action === 'plans-close'));
+    this.bookFocusAction = undefined; this.bookAnnouncement = true;
   }
   private focus(object?: THREE.Object3D) {
     this.renderer.domElement.style.cursor = object ? 'pointer' : 'default';
     if (object === this.focused) return;
     this.focused = object; this.hint.visible = this.highlight.visible = !!object;
     this.element.dataset.focusedAction = object?.userData.action ?? '';
-    const label = object?.userData.action === this.view && ['machine', 'prototypes', 'duplicator'].includes(this.view) ? 'Reculer dans l’atelier' : object?.userData.action === 'counter' && this.view === 'counter' ? 'Revenir à l’entrée' : object?.userData.action === 'backroom' ? this.journey.inPublic ? this.privateAccess ? 'Entrer dans l’arrière-boutique' : 'Accès privé — réparation initiale requise' : 'Retourner dans la boutique' : object?.userData.label;
+    const label = object?.userData.action === this.view && ['machine', 'prototypes', 'duplicator', 'plans'].includes(this.view) ? 'Reculer dans l’atelier' : object?.userData.action === 'counter' && this.view === 'counter' ? 'Revenir à l’entrée' : object?.userData.action === 'backroom' ? this.journey.inPublic ? this.privateAccess ? 'Rejoindre l’atelier d’Azur — trajet automatique' : 'Accès privé — réparation initiale requise' : 'Retourner dans la boutique' : object?.userData.label;
     this.renderer.domElement.setAttribute('aria-label', label ?? 'Boutique publique d’Azur');
     if (!object) return;
     this.announce(label);
     const m = this.hint.material as THREE.SpriteMaterial; m.map?.dispose();
     m.map = map(1024, 96, c => { c.fillStyle = '#25332bea'; c.fillRect(0, 0, 1024, 96); c.fillStyle = '#eddbb5'; c.font = '32px monospace'; c.textAlign = 'center'; c.fillText(label, 512, 59, 980); }); m.needsUpdate = true;
     this.hint.position.copy(object.userData.hint);
-    const width = object.userData.action === 'entrance' ? 1.8 : Math.max(2.7, this.camera.position.distanceTo(this.hint.position) * 0.52);
+    const distance = this.camera.position.distanceTo(this.hint.position);
+    const width = object.userData.action.startsWith('plans-') ? Math.max(0.62, distance * 0.7) : object.userData.action === 'entrance' ? 1.8 : Math.max(2.7, distance * 0.52);
     this.hint.scale.set(width, width * 96 / 1024, 1);
     this.highlight.box.setFromObject(object).expandByScalar(0.012);
   }
@@ -640,19 +721,32 @@ export class AzurShop {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.scene.updateMatrixWorld(true);
     this.ray.setFromCamera(new THREE.Vector2((x - rect.left) / rect.width * 2 - 1, 1 - (y - rect.top) / rect.height * 2), this.camera);
-    const hit = this.ray.intersectObjects(this.targets.filter(object => this.allowed(object)), true)[0];
+    const hit = this.ray.intersectObjects(this.targets.filter(object => this.allowed(object)), true).find(hit => this.visible(hit.object));
     if (!hit) return;
     let target: THREE.Object3D | null = hit.object;
-    while (target && !target.userData.action) target = target.parent;
+    while (target && (!target.userData.action || !this.allowed(target))) target = target.parent;
     if (!target || this.blocked(hit.distance, target)) return;
     return target;
   }
   private allowed(object: THREE.Object3D) {
-    return object.userData.views.includes(this.view) && (object.userData.action !== 'enter-workshop' || this.journey.secretOpen);
+    if (!this.visible(object) || !object.userData.views.includes(this.view)) return false;
+    const action = object.userData.action, book = this.workshop.notebook;
+    if (this.view === 'plans') {
+      if (action === 'plans-next') return book.canTurn(1);
+      if (action === 'plans-previous') return book.canTurn(-1);
+      return (action === 'plans-close' || action === 'plans-buy' && !!book.planId) && !book.turning;
+    }
+    if (this.view === 'devis') return ['buy-repair-plan', 'quote-close'].includes(action);
+    return true;
+  }
+  private visible(object: THREE.Object3D) {
+    let ancestor: THREE.Object3D | null = object;
+    while (ancestor) { if (!ancestor.visible) return false; ancestor = ancestor.parent; }
+    return true;
   }
   private blocked(distance: number, target: THREE.Object3D) {
     return this.ray.intersectObjects(this.root.children.filter(child => child.visible), true).some(hit => {
-      if (hit.distance >= distance - 0.015 || !(hit.object instanceof THREE.Mesh) || hit.object.material instanceof Array || hit.object.material.transparent) return false;
+      if (!this.visible(hit.object) || hit.distance >= distance - 0.015 || !(hit.object instanceof THREE.Mesh) || hit.object.material instanceof Array || hit.object.material.transparent) return false;
       let ancestor: THREE.Object3D | null = hit.object;
       while (ancestor) { if (ancestor === target) return false; ancestor = ancestor.parent; }
       return true;
@@ -686,7 +780,9 @@ export class AzurShop {
         const targets = this.keyboardTargets(), i = targets.indexOf(this.focused!);
         const next = i < 0 ? (event.shiftKey ? targets.length - 1 : 0) : (i + (event.shiftKey ? -1 : 1) + targets.length) % targets.length;
         this.focus(targets[next]);
-      } else if (event.key === 'Enter' || event.code === 'Space') { event.preventDefault(); if (this.focused) this.act(this.focused); }
+      } else if (this.view === 'plans' && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+        event.preventDefault(); this.pointer = undefined; if (!event.repeat) this.turnNotebook(event.key === 'ArrowRight' ? 1 : -1);
+      } else if (event.key === 'Enter' || event.code === 'Space') { event.preventDefault(); if (this.focused && !event.repeat) this.act(this.focused); }
     });
   }
   private resize() {
@@ -694,24 +790,29 @@ export class AzurShop {
     this.renderer.setSize(w, h); this.camera.aspect = w / h;
     this.composer?.setSize(w, h);
     // Le cadrage d'entrée garde le comptoir et les retours latéraux visibles à 1280×720.
-    this.camera.fov = this.camera.aspect < 1.5 ? 68 : 58; this.camera.updateProjectionMatrix();
+    this.camera.fov = this.view === 'plans' ? 70 : this.camera.aspect < 1.5 ? 68 : 58; this.camera.updateProjectionMatrix();
     this.refreshPointer = true;
   }
   frame(ms: number) {
     if (!this.active) return;
+    const wasMoving = this.journey.moving;
     this.journey.advance(ms, this.reduced);
+    if (wasMoving && !this.journey.moving && (this.view === 'workshop' || this.view === 'entrance')) this.announce(this.view === 'workshop' ? 'Atelier d’Azur. Carnet des plans à droite ; repère Boutique ou Échap pour retourner directement dans la boutique.' : 'Retour dans la boutique. Échap quitte la visite.');
     const pose = this.journey.pose;
-    const fov = this.view === 'backroom' && pose.position.z < -5.2 ? 68 : this.camera.aspect < 1.5 ? 68 : 58;
+    const fov = this.view === 'plans' ? 70 : this.view === 'backroom' && pose.position.z < -5.2 ? 68 : this.camera.aspect < 1.5 ? 68 : 58;
     if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = this.reduced ? fov : THREE.MathUtils.lerp(this.camera.fov, fov, Math.min(1, ms / 140)); this.camera.updateProjectionMatrix(); }
     this.camera.position.copy(pose.position); this.camera.lookAt(new THREE.Vector3().copy(pose.lookAt)); this.camera.updateMatrixWorld();
     if (this.publicKey) { this.publicKey.intensity = 0.9 * THREE.MathUtils.clamp((pose.position.z + 5.3) / 1.5, 0, 1); this.publicKey.visible = this.publicKey.intensity > 0; }
     this.doorLeaf.rotation.y = this.journey.door * Math.PI / 2;
     this.workshop.update(this.journey.shelf, this.journey.latch, this.journey.door > 0);
+    if (this.workshop.notebook.advance(ms, this.reduced) && this.view === 'plans') this.finishedBookTurn();
+    this.syncNotebook();
     this.element.dataset.secret = this.journey.secretOpen ? 'open' : 'closed';
     if (this.refreshPointer && this.progress === 1) {
       this.refreshPointer = false;
       if (this.pointer) this.focus(this.hit(this.pointer.x, this.pointer.y));
     }
+    if (this.bookAnnouncement && this.view === 'plans') { this.bookAnnouncement = false; this.announce(this.bookDescription()); }
     this.element.dataset.view = this.view; this.element.dataset.moving = String(this.progress < 1);
     if (!this.reduced) { this.rainTime = (this.rainTime + ms / 1000 * 1.2) % 5.6; this.rain.position.y = -this.rainTime; }
     if (this.composer && this.quality !== 'low') this.composer.render();

@@ -1,6 +1,6 @@
 import type { CameraPose, Vector } from './camera';
 
-export type AzurView = 'entrance' | 'counter' | 'backroom' | 'discovery' | 'workshop' | 'machine' | 'prototypes' | 'duplicator';
+export type AzurView = 'entrance' | 'counter' | 'devis' | 'backroom' | 'discovery' | 'workshop' | 'machine' | 'prototypes' | 'duplicator' | 'plans';
 export const AZUR = {
   door: { x: 1.55, z: -4.27, width: 1.23, height: 2.47 },
   secret: { x: 1.55, z: -10.2, width: 1.8, depth: 0.52, travel: 2.25, openingZ: -10.7 },
@@ -10,13 +10,17 @@ export const AZUR = {
 const pose = (x: number, z: number, lx: number, ly: number, lz: number): CameraPose => ({ position: { x, y: AZUR.eyeHeight, z }, lookAt: { x: lx, y: ly, z: lz } });
 export const AZUR_POSES: Record<AzurView, CameraPose> = {
   entrance: pose(-0.6, 5.6, -0.3, 1.43, -2.4), counter: pose(-0.4, 2.1, -0.5, 1.35, -1.3),
+  devis: pose(-1.1, 1.05, -1.1, 1.3, 0.16),
   backroom: pose(1.55, -6, 1.55, 1.45, -10.2), discovery: pose(1.55, -8.35, 1.55, 1.5, -13.7),
   workshop: pose(0.5, -14.4, 0, 1.45, -19.3), machine: pose(-0.05, -15.65, -0.75, 1.5, -18.85),
   prototypes: pose(2.3, -19, 4.4, 1.5, -20.05), duplicator: pose(-2.3, -17, -3.8, 1.5, -19.3),
+  plans: pose(2.35, -17.05, 2.35, 1.04, -17.8),
 };
 const smooth = (v: number) => { const t = Math.min(1, Math.max(0, v)); return t * t * (3 - 2 * t); };
 const mix = (a: Vector, b: Vector, t: number): Vector => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t });
 const distance = (a: Vector, b: Vector) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+// L'allée à gauche du bureau dégage le trajet du poste de prototypes, à l'aller et au retour.
+const prototypeAisle: Vector[] = [{ x: 1.1, y: AZUR.eyeHeight, z: -18.75 }];
 function orient(a: CameraPose, b: CameraPose, position: Vector, t: number): CameraPose {
   const angles = (p: CameraPose) => ({ yaw: Math.atan2(p.lookAt.x - p.position.x, p.lookAt.z - p.position.z), pitch: Math.atan2(p.lookAt.y - p.position.y, Math.hypot(p.lookAt.x - p.position.x, p.lookAt.z - p.position.z)) });
   const from = angles(a), to = angles(b), yaw = from.yaw + Math.atan2(Math.sin(to.yaw - from.yaw), Math.cos(to.yaw - from.yaw)) * t, pitch = from.pitch + (to.pitch - from.pitch) * t;
@@ -57,40 +61,55 @@ export class AzurNavigation {
   private initialLatch = 0;
   get moving() { return this.steps.length > 0; }
   get secretOpen() { return this.shelf >= 1; }
-  get inPublic() { return this.view === 'entrance' || this.view === 'counter'; }
+  get inPublic() { return ['entrance', 'counter', 'devis'].includes(this.view); }
   private add(to: CameraPose, duration: number, via: Vector[] = [], mechanism: { door?: number; shelf?: number; latch?: number } = {}) {
     const from = structuredClone(this.steps.at(-1)?.to ?? this.pose);
     this.steps.push({ from, to: structuredClone(to), duration, path: route([from.position, ...via, to.position]), ...mechanism });
   }
+  private enterBackroom() {
+    const door = pose(1.55, -3.45, 1.55, 1.5, -6.5);
+    this.add(door, 5200, [{ x: 2.15, y: AZUR.eyeHeight, z: 1.05 }, { x: 2.15, y: AZUR.eyeHeight, z: -1.5 }]);
+    this.add(door, 600, [], { door: 1 });
+    this.add(AZUR_POSES.backroom, 1500);
+  }
+  private revealPassage() {
+    const hold = this.steps.at(-1)?.to ?? this.pose;
+    this.add(hold, 350, [], { latch: 1 });
+    this.add(hold, 1600, [], { shelf: 1 });
+    this.add(AZUR_POSES.discovery, 1800);
+  }
   reset() { this.steps = []; this.elapsed = 0; this.view = 'entrance'; this.pose = structuredClone(AZUR_POSES.entrance); this.door = this.shelf = this.latch = 0; }
   go(view: AzurView, authorized = false) {
     if (this.moving || view === this.view) return false;
-    if ((view === 'entrance' || view === 'counter') && this.inPublic) { this.view = view; this.add(AZUR_POSES[view], 500); return true; }
+    if (['entrance', 'counter', 'devis'].includes(view) && this.inPublic) { this.view = view; this.add(AZUR_POSES[view], 500); return true; }
     if (view === 'backroom' && this.inPublic) {
       if (!authorized) return false;
-      this.add(pose(1.55, -3.45, 1.55, 1.5, -6.5), 5200, [{ x: 2.15, y: AZUR.eyeHeight, z: 1.05 }, { x: 2.15, y: AZUR.eyeHeight, z: -1.5 }]);
-      this.add(pose(1.55, -3.45, 1.55, 1.5, -6.5), 600, [], { door: 1 });
-      this.add(AZUR_POSES.backroom, 1500);
-    } else if (view === 'entrance' && (this.view === 'backroom' || this.view === 'discovery')) {
+      this.enterBackroom();
+    } else if (view === 'entrance' && !this.inPublic) {
+      if (this.view !== 'backroom' && this.view !== 'discovery') {
+        if (this.view !== 'workshop') this.add(AZUR_POSES.workshop, Math.max(850, distance(this.pose.position, AZUR_POSES.workshop.position) * 600), this.view === 'prototypes' ? prototypeAisle : []);
+        this.add(AZUR_POSES.backroom, 5500, [{ x: 1.55, y: AZUR.eyeHeight, z: -13.9 }, { x: 1.55, y: AZUR.eyeHeight, z: -10.9 }]);
+      }
       this.add(pose(1.55, -3.45, 1.55, 1.5, 0), 2100);
       this.add(pose(1.55, -3.45, 1.55, 1.5, 0), 600, [], { door: 0 });
       this.add(AZUR_POSES.entrance, 5200, [{ x: 2.15, y: AZUR.eyeHeight, z: -1.5 }, { x: 2.15, y: AZUR.eyeHeight, z: 1.05 }]);
     } else if (view === 'discovery' && this.view === 'backroom') {
       if (!authorized || this.secretOpen) return false;
-      this.add(this.pose, 350, [], { latch: 1 });
-      this.add(this.pose, 1600, [], { shelf: 1 });
-      this.add(AZUR_POSES.discovery, 1800);
-    } else if (view === 'workshop' && (this.view === 'backroom' || this.view === 'discovery')) {
-      if (!authorized || !this.secretOpen) return false;
-      this.add(AZUR_POSES.workshop, this.view === 'backroom' ? 5500 : 3500, [{ x: 1.55, y: AZUR.eyeHeight, z: -10.9 }, { x: 1.55, y: AZUR.eyeHeight, z: -13.9 }]);
+      this.revealPassage();
+    } else if (view === 'workshop' && (this.inPublic || this.view === 'backroom' || this.view === 'discovery')) {
+      if (!authorized) return false;
+      if (this.inPublic) this.enterBackroom();
+      const discovering = !this.secretOpen;
+      if (discovering) this.revealPassage();
+      this.add(AZUR_POSES.workshop, !discovering && this.view !== 'discovery' ? 5500 : 3500, [{ x: 1.55, y: AZUR.eyeHeight, z: -10.9 }, { x: 1.55, y: AZUR.eyeHeight, z: -13.9 }]);
     } else if (view === 'backroom' && this.view === 'discovery') {
       this.add(AZUR_POSES.backroom, 1800);
     } else if (view === 'backroom' && !this.inPublic) {
-      this.add(AZUR_POSES.workshop, 700);
+      this.add(AZUR_POSES.workshop, Math.max(850, distance(this.pose.position, AZUR_POSES.workshop.position) * 600), this.view === 'prototypes' ? prototypeAisle : []);
       this.add(AZUR_POSES.backroom, 5500, [{ x: 1.55, y: AZUR.eyeHeight, z: -13.9 }, { x: 1.55, y: AZUR.eyeHeight, z: -10.9 }]);
-    } else if (['workshop', 'machine', 'prototypes', 'duplicator'].includes(view) && ['workshop', 'machine', 'prototypes', 'duplicator'].includes(this.view)) {
-      if (this.view !== 'workshop') this.add(AZUR_POSES.workshop, Math.max(850, distance(this.pose.position, AZUR_POSES.workshop.position) * 600));
-      if (view !== 'workshop') this.add(AZUR_POSES[view], Math.max(850, distance(AZUR_POSES.workshop.position, AZUR_POSES[view].position) * 600));
+    } else if (['workshop', 'machine', 'prototypes', 'duplicator', 'plans'].includes(view) && ['workshop', 'machine', 'prototypes', 'duplicator', 'plans'].includes(this.view)) {
+      if (this.view !== 'workshop') this.add(AZUR_POSES.workshop, Math.max(850, distance(this.pose.position, AZUR_POSES.workshop.position) * 600), this.view === 'prototypes' ? prototypeAisle : []);
+      if (view !== 'workshop') this.add(AZUR_POSES[view], Math.max(850, distance(AZUR_POSES.workshop.position, AZUR_POSES[view].position) * 600), view === 'prototypes' ? prototypeAisle : []);
     } else return false;
     this.view = view; this.initialDoor = this.door; this.initialShelf = this.shelf; this.initialLatch = this.latch; return true;
   }

@@ -14,10 +14,12 @@ const object = (value: unknown): value is Record<string, unknown> => value !== n
 function validateBall(value: unknown, nextSequence: number, history: boolean): asserts value is Ball {
   requireValid(object(value), 'bille manquante.');
   requireValid(integer(value.sequence, 1, nextSequence - 1) && value.id === `ball-${value.sequence}`, 'identifiant de bille.');
-  requireValid(value.origin === 'manual' || value.origin === 'auto', 'origine de bille.');
+  requireValid(value.origin === 'manual' || value.origin === 'auto' || value.origin === 'collector', 'origine de bille.');
   requireValid(integer(value.betCents, 0, CONFIG.maxBet) && integer(value.baseCents, 100, CONFIG.maxBet), 'mise ou base.');
-  requireValid(value.origin === 'auto' ? value.betCents === 0 && value.baseCents === 100 : value.betCents >= 100 && value.betCents % 100 === 0 && value.baseCents === value.betCents, 'cohérence de la mise.');
+  requireValid(value.origin !== 'manual' ? value.betCents === 0 && value.baseCents === 100 : value.betCents >= 100 && value.betCents % 100 === 0 && value.baseCents === value.betCents, 'cohérence de la mise.');
+  if (Object.hasOwn(value, 'collectorEligible')) requireValid(value.collectorEligible === true && value.origin !== 'collector', 'contribution au Collecteur.');
   requireValid(integer(value.exit, 0, 14) && value.multiplier === EXITS[value.exit], 'sortie et multiplicateur.');
+  if (Object.hasOwn(value, 'magnetFrom')) requireValid(value.origin === 'auto' && integer(value.magnetFrom, 1, 13) && Math.abs((value.exit as number) - value.magnetFrom) === 1 && (value.multiplier as number) > EXITS[value.magnetFrom], 'attraction magnétique.');
   requireValid(value.bonus === 1 || value.bonus === CONFIG.bonusFactor || value.bonus === 10, 'facteur de Décharge.');
   requireValid(integer(value.returnCents) && value.returnCents === Math.round(value.baseCents * (value.multiplier as number) / 100) * value.bonus, 'retour figé.');
   if (history) requireValid(value.netCents === value.returnCents - value.betCents, 'bénéfice net.');
@@ -28,9 +30,15 @@ export function parseSnapshot(raw: string): GameState {
   let value: unknown;
   try { value = JSON.parse(raw); } catch { throw new Error('Le fichier ne contient pas un JSON valide.'); }
   requireValid(object(value), 'snapshot manquant.');
-  requireValid(value.saveVersion === 1 || value.saveVersion === 2 || value.saveVersion === 3, 'format non pris en charge. Votre partie actuelle est conservée.');
+  requireValid([1, 2, 3, 4, 5, 6].includes(value.saveVersion as number), 'format non pris en charge. Votre partie actuelle est conservée.');
   const legacy = value.saveVersion === 1;
-  const classic = value.saveVersion !== 3;
+  const classic = value.saveVersion === 1 || value.saveVersion === 2;
+  const preCollector = (value.saveVersion as number) < 4;
+  const beforeModules = (value.saveVersion as number) < 6;
+  if ((value.saveVersion as number) < 5) {
+    requireValid(!Object.hasOwn(value, 'plans') || Array.isArray(value.plans) && value.plans.length === 0, 'plans dans un ancien format.');
+    value.plans = [];
+  }
   requireValid(value.profile === 'prototype', 'configuration inconnue.');
   requireValid(integer(value.walletCents), 'solde.');
   requireValid(integer(value.selectedBetCents, 100, 1000) && value.selectedBetCents % 100 === 0, 'mise sélectionnée.');
@@ -40,14 +48,28 @@ export function parseSnapshot(raw: string): GameState {
   for (const ball of value.pendingBalls) validateBall(ball, value.nextBallSequence, false);
   for (const ball of value.history) validateBall(ball, value.nextBallSequence, true);
   const balls = [...value.pendingBalls, ...value.history] as Ball[];
+  if (preCollector) {
+    requireValid(balls.every(ball => ball.origin !== 'collector' && !Object.hasOwn(ball, 'collectorEligible')) && (!Object.hasOwn(value, 'collectorCharge') || value.collectorCharge === 0), 'Collecteur dans un ancien format.');
+    value.collectorCharge = 0;
+  }
+  requireValid(integer(value.collectorCharge, 0, CONFIG.collectorThreshold), 'réservoir du Collecteur.');
   requireValid(new Set(balls.map(ball => ball.id)).size === balls.length, 'bille dupliquée.');
   requireValid(Array.isArray(value.upgrades) && value.upgrades.every(id => typeof id === 'string' && Object.hasOwn(UPGRADES, id)) && new Set(value.upgrades).size === value.upgrades.length, 'améliorations.');
+  requireValid(Array.isArray(value.plans) && value.plans.every(id => typeof id === 'string' && Object.hasOwn(UPGRADES, id) && !(value.upgrades as string[]).includes(id)) && new Set(value.plans).size === value.plans.length, 'plans.');
+  const owned = [...value.upgrades, ...value.plans];
+  if (beforeModules) requireValid(!owned.some(id => id === 'azur.magnets' || id === 'azur.collector'), 'nouveaux modules dans un ancien format.');
+  requireValid(!owned.includes('azur.magnets') || value.upgrades.includes('azur.auto_launcher'), 'aimants sans Doigt installé.');
   requireValid(typeof value.repairTriggered === 'boolean' && typeof value.repairPurchased === 'boolean', 'état de réparation.');
   requireValid(value.repairPurchased === value.upgrades.includes('azur.initial_repair') && (!value.repairPurchased || value.repairTriggered), 'réparation incohérente.');
   requireValid(value.repairPurchased || value.upgrades.length === 0, 'atelier verrouillé.');
+  requireValid((value.repairPurchased || value.plans.every(id => id === 'azur.initial_repair')) && (value.repairTriggered || value.plans.length === 0), 'plans avant déblocage.');
+  requireValid(value.repairPurchased || (value.collectorCharge === 0 && !balls.some(ball => ball.origin === 'collector' || ball.collectorEligible)), 'Collecteur avant réparation.');
   requireValid(!balls.some(ball => ball.origin === 'auto') || value.upgrades.includes('azur.auto_launcher'), 'automatisation non achetée.');
   requireValid(integer(value.heatCount, 0, CONFIG.chargeCount) && typeof value.chargeReady === 'boolean' && value.chargeReady === (value.heatCount === CONFIG.chargeCount), 'charge.');
   requireValid(integer(value.bonusRemainingMs, 0, CONFIG.bonusDuration) && integer(value.factoryRemainingMs, 0, legacy ? 15000 : CONFIG.factoryDuration) && integer(value.manualCooldownMs, 0, CONFIG.manualInterval), 'durées actives.');
+  // Extension additive : les anciens formats 1/2/3 commencent avec une recharge complète.
+  if (!Object.hasOwn(value, 'magnetCooldownMs')) value.magnetCooldownMs = CONFIG.magnetRecharge;
+  requireValid(integer(value.magnetCooldownMs, 0, CONFIG.magnetRecharge), 'recharge des aimants.');
   requireValid(value.bonusRemainingMs === 0 || (!value.chargeReady && value.heatCount === 0), 'charge pendant Décharge.');
   requireValid(value.factoryRemainingMs === 0 || value.pendingBalls.length === 0, 'billes pendant le service.');
   requireValid(object(value.stats), 'statistiques.');
@@ -64,7 +86,7 @@ export function parseSnapshot(raw: string): GameState {
     requireValid(!Object.hasOwn(f, 'events'), 'événements dans un ancien format.');
     f.events = [];
   }
-  value.saveVersion = 3;
+  value.saveVersion = 6;
   requireValid(Array.isArray(f.events) && (f.events.length === 0 || f.events.length === 3), 'programme des événements.');
   for (let index = 0; index < f.events.length; index++) {
     const event = f.events[index];
@@ -97,7 +119,7 @@ export function parseSnapshot(raw: string): GameState {
   requireValid(s.walletCents === CONFIG.initialWallet + s.stats.grossReturns + s.stats.factoryIncome - s.stats.paidBets - s.stats.upgradeExpenses, 'bilan du solde.');
   const pendingBets = s.pendingBalls.reduce((sum, ball) => sum + ball.betCents, 0);
   requireValid(s.stats.paidBets >= pendingBets && s.stats.freeProduction <= s.stats.grossReturns && s.stats.paidProfit === s.stats.grossReturns - s.stats.freeProduction - (s.stats.paidBets - pendingBets), 'bilan des retours.');
-  requireValid(s.stats.upgradeExpenses === s.upgrades.reduce((sum, id: UpgradeId) => sum + UPGRADES[id].price, 0), 'dépenses d’atelier.');
+  requireValid(s.stats.upgradeExpenses === [...s.upgrades, ...s.plans].reduce((sum, id: UpgradeId) => sum + UPGRADES[id].price, 0), 'dépenses d’atelier.');
   requireValid(s.repairTriggered === (s.stats.grossReturns >= CONFIG.repairThreshold), 'seuil de panne.');
   requireValid(s.stats.factoryIncome % CONFIG.factoryGreyReward === 0, 'salaires.');
   requireValid(s.history.reduce((sum, ball) => sum + ball.returnCents, 0) <= s.stats.grossReturns, 'retours de l’historique.');

@@ -1,6 +1,8 @@
-import { CONFIG, UPGRADES } from '../config';
+import { CONFIG, EXITS, UPGRADES } from '../config';
 import type { UpgradeId } from '../config';
 import { drawOutcome } from './outcomes';
+import { magnetExit } from './magnets';
+import { purchaseIssue, installationIssue } from './plans';
 import type { Random } from './outcomes';
 import { isBroken, newGame } from './state';
 import { advanceFactory, factoryReward, newFactory, planFactoryEvents } from './packing';
@@ -16,10 +18,11 @@ export function settleInto(state: GameState, id: string): Result | undefined {
   state.walletCents += ball.returnCents;
   state.stats.settled++;
   state.stats.grossReturns += ball.returnCents;
-  if (ball.origin === 'auto') state.stats.freeProduction += ball.returnCents;
+  if (ball.origin !== 'manual') state.stats.freeProduction += ball.returnCents;
   else state.stats.paidProfit += result.netCents;
   state.history.unshift(result);
   state.history = state.history.slice(0, CONFIG.historyLimit);
+  if (ball.collectorEligible && ball.origin !== 'collector' && ball.multiplier < 100) state.collectorCharge = Math.min(CONFIG.collectorThreshold, state.collectorCharge + 1);
   if (state.bonusRemainingMs === 0 && !state.chargeReady) {
     state.heatCount = Math.min(CONFIG.chargeCount, state.heatCount + 1);
     state.chargeReady = state.heatCount === CONFIG.chargeCount;
@@ -44,7 +47,9 @@ export class Game {
   private autoElapsed = 0;
   private checkpointElapsed = 0;
   private fractionalMs = 0;
-  constructor(state: GameState, private save: Save, private random: Random = Math.random) { this.state = structuredClone(state); }
+  constructor(state: GameState, private save: Save, private random: Random = Math.random, private options: { magnetsTrial?: boolean; collectorTrial?: boolean } = {}) { this.state = structuredClone(state); }
+  get magnetsAvailable() { return (this.state.upgrades.includes('azur.magnets') || !!this.options.magnetsTrial) && this.state.repairPurchased && this.state.upgrades.includes('azur.auto_launcher'); }
+  get collectorAvailable() { return (this.state.upgrades.includes('azur.collector') || !!this.options.collectorTrial) && this.state.repairPurchased; }
 
   private available(): boolean { return this.writable && !this.error; }
   private commit(next: GameState): boolean {
@@ -88,18 +93,25 @@ export class Game {
     if (s.pendingBalls.length >= CONFIG.maxBalls) { this.notice = 'Le plateau est plein : 50 billes. Attendez une arrivée.'; return; }
     if (origin === 'manual' && s.manualCooldownMs > 0) return;
     if (origin === 'auto' && (!this.autoEnabled || !s.upgrades.includes('azur.auto_launcher'))) return;
+    if (origin === 'collector' && (!this.collectorAvailable || s.collectorCharge !== CONFIG.collectorThreshold)) return;
     const betCents = origin === 'manual' ? s.selectedBetCents : 0;
     if (s.walletCents < betCents) { this.notice = 'Pas assez de pièces. Un service à l’usine permet de repartir.'; return; }
-    const { multiplier, exit } = drawOutcome(this.random);
+    const drawn = drawOutcome(this.random);
+    const exit = origin === 'auto' && this.magnetsAvailable && s.magnetCooldownMs === 0 ? magnetExit(drawn.exit, this.random) : drawn.exit;
+    const multiplier = EXITS[exit];
     const baseCents = origin === 'manual' ? betCents : 100;
     const bonus = s.bonusRemainingMs > 0 ? CONFIG.bonusFactor : 1;
     const ball: Ball = { id: `ball-${s.nextBallSequence}`, sequence: s.nextBallSequence, origin, betCents, baseCents, multiplier, exit, bonus, returnCents: Math.round(baseCents * multiplier / 100) * bonus };
+    if (exit !== drawn.exit) ball.magnetFrom = drawn.exit;
+    if (origin !== 'collector' && this.collectorAvailable) ball.collectorEligible = true;
     const next = structuredClone(s);
     next.walletCents -= betCents;
     next.nextBallSequence++;
     next.stats.launched++;
     next.stats.paidBets += betCents;
     next.pendingBalls.push(ball);
+    if (ball.magnetFrom !== undefined) next.magnetCooldownMs = CONFIG.magnetRecharge;
+    if (origin === 'collector') next.collectorCharge = 0;
     if (origin === 'manual') next.manualCooldownMs = CONFIG.manualInterval;
     if (!this.commit(next)) return;
     this.notice = '';
@@ -120,20 +132,32 @@ export class Game {
     return this.commit({ ...structuredClone(this.state), selectedBetCents: bet });
   }
 
-  buy(id: UpgradeId): boolean {
+  buyPlan(id: UpgradeId): boolean {
     const s = this.state;
     if (!this.available() || s.factoryRemainingMs > 0 || !Object.hasOwn(UPGRADES, id)) return false;
-    if (s.upgrades.includes(id)) return false;
-    if (id === 'azur.initial_repair' ? !isBroken(s) || s.pendingBalls.length > 0 : !s.repairPurchased) return false;
+    const issue = purchaseIssue(s, id);
+    if (issue) { this.notice = issue; return false; }
     const item = UPGRADES[id];
     if (s.walletCents < item.price) { this.notice = 'Il manque quelques pièces. L’usine reste ouverte.'; return false; }
     const next = structuredClone(s);
     next.walletCents -= item.price;
     next.stats.upgradeExpenses += item.price;
+    next.plans.push(id);
+    if (!this.commit(next)) return false;
+    this.notice = `Plan ${item.name} acheté. De retour dans la cave, utilisez la trappe de montage du Plinko.`;
+    return true;
+  }
+
+  installPlan(id: UpgradeId): boolean {
+    if (!this.available() || !Object.hasOwn(UPGRADES, id)) return false;
+    const issue = installationIssue(this.state, id);
+    if (issue) { this.notice = issue; return false; }
+    const next = structuredClone(this.state);
+    next.plans = next.plans.filter(plan => plan !== id);
     next.upgrades.push(id);
     if (id === 'azur.initial_repair') next.repairPurchased = true;
     if (!this.commit(next)) return false;
-    this.notice = id === 'azur.initial_repair' ? '« Normalement, ça tient. » — Azur. L’atelier est ouvert.' : `${item.name} installé.`;
+    this.notice = id === 'azur.initial_repair' ? '« Normalement, ça tient. » — Azur. Machine réparée, atelier privé accessible.' : `${UPGRADES[id].name} installé. Plan utilisé, aucun nouveau débit.`;
     return true;
   }
 
@@ -208,11 +232,18 @@ export class Game {
         if (this.commit(next)) this.notice = reward ? `Service terminé. +${(reward / 100).toFixed(2).replace('.', ',')} pièces.` : 'Service terminé. Aucune bille grise : aucun salaire.';
         return;
       }
-    } else next.bonusRemainingMs = Math.max(0, next.bonusRemainingMs - ms);
+    } else {
+      next.bonusRemainingMs = Math.max(0, next.bonusRemainingMs - ms);
+      if (clock === 'all' && this.autoEnabled && this.magnetsAvailable && !isBroken(next)) next.magnetCooldownMs = Math.max(0, next.magnetCooldownMs - ms);
+    }
     this.checkpointElapsed += ms;
     if (this.checkpointElapsed >= 1000 || (this.state.bonusRemainingMs > 0 && next.bonusRemainingMs === 0)) {
       if (!this.commit(next)) return;
     } else this.state = next;
+    if (clock === 'all' && this.collectorAvailable && !isBroken(this.state) && this.state.factoryRemainingMs === 0 && this.state.collectorCharge === CONFIG.collectorThreshold && this.state.pendingBalls.length < CONFIG.maxBalls) {
+      this.launch('collector');
+      if (this.error) return;
+    }
     if (clock === 'all' && this.autoEnabled && !isBroken(this.state) && this.state.factoryRemainingMs === 0) {
       this.autoElapsed += ms;
       if (this.autoElapsed >= CONFIG.autoInterval) { this.autoElapsed = 0; this.launch('auto'); }

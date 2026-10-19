@@ -9,6 +9,8 @@ import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CAVE, CONFIG, EXITS, MODULE_SLOTS, STAIR_LANDING, STAIRS, VIEWS, WORKBENCH } from '../config';
 import type { CameraPose, Navigation, View } from '../navigation/camera';
 import { DiegeticInterface } from './interfaces';
+import { MagnetModule } from './magnets';
+import { CollectorModule } from './collector';
 import { CaveDecor, finishSurface, wovenRug } from './decor';
 import type { InterfaceState } from './interfaces';
 import type { Ball, GameState } from '../game/state';
@@ -63,6 +65,9 @@ export class PlinkoScene {
   private autoMaterial = new THREE.MeshStandardMaterial({ color: '#b2d7bc', metalness: 0.75, roughness: 0.22 });
   private bonusMaterial = new THREE.MeshStandardMaterial({ color: '#ffdd8e', metalness: 0.7, roughness: 0.2, emissive: '#c87928', emissiveIntensity: 0.45 });
   private modules = new Map<string, THREE.Group>();
+  private magnets!: MagnetModule;
+  private collector!: CollectorModule;
+  private collectorMaterial = new THREE.MeshStandardMaterial({ color: '#c4aed4', metalness: 0.65, roughness: 0.25 });
   private indicator!: THREE.Mesh;
   private lamps: THREE.Mesh[] = [];
   private exitLabels: THREE.Mesh[] = [];
@@ -75,7 +80,7 @@ export class PlinkoScene {
   private interfaces!: DiegeticInterface;
   private interactionEnabled = true;
   private travelCamera?: CameraPose;
-  private ui: InterfaceState = { canWrite: false, autoEnabled: false, message: '', cataloguePage: 0, historyPage: 0 };
+  private ui: InterfaceState = { canWrite: false, autoEnabled: false, message: '', historyPage: 0 };
   private currentState?: GameState;
   private focused?: THREE.Object3D;
   private hint = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: true, depthWrite: false }));
@@ -147,7 +152,7 @@ export class PlinkoScene {
     this.workbench.position.set(-WORKBENCH.originX, 0, -WORKBENCH.originZ); benchFrame.add(this.workbench); this.scene.add(benchFrame);
     this.buildRoom(); this.buildMachine(); this.buildModules(); this.buildBench(); this.buildStairs();
     new CaveDecor(this.scene, this.wood, this.darkWood, this.workbench);
-    this.interfaces = new DiegeticInterface(this.scene, this.machine, this.modules, this.workbench, (object, action, label, views) => this.register(object, action, label, views));
+    this.interfaces = new DiegeticInterface(this.scene, this.machine, this.modules, (object, action, label, views) => this.register(object, action, label, views));
     this.target('plinko', this.machine, 0, 0, -0.2, 11.7, 14.4, () => 'Revenir à la machine', ['azur', 'commandes']);
     this.hint.visible = false; this.highlight.visible = false;
     (this.highlight.material as THREE.LineBasicMaterial).transparent = true; (this.highlight.material as THREE.LineBasicMaterial).opacity = 0.38;
@@ -260,7 +265,11 @@ export class PlinkoScene {
   private buildModules() {
     for (const slot of MODULE_SLOTS) {
       const group = new THREE.Group(); group.name = `module:${slot.id}`; group.position.set(slot.position[0], slot.position[1], slot.position[2]); group.visible = false; this.machine.add(group); this.modules.set(slot.id, group);
-      if (slot.id === 'auto_launcher') {
+      if (slot.id === 'magnets') {
+        this.magnets = new MagnetModule(group, this.register.bind(this));
+      } else if (slot.id === 'collector') {
+        this.collector = new CollectorModule(group, this.register.bind(this));
+      } else if (slot.id === 'auto_launcher') {
         this.box(group, 1.45, 2, 1.2, 0, 0, 0.1, this.cream, 0.25); this.screen(group, 0, 0.25, 0.76, 0.94, 0.56);
         this.cylinder(group, 0.5, 2.4, 0, 2.13, 0.1, new THREE.MeshStandardMaterial({ color: '#bcdde1', transparent: true, opacity: 0.22, roughness: 0.2, depthWrite: false }));
         for (const y of [0.95, 3.35]) this.cylinder(group, 0.58, 0.14, 0, y, 0.1, this.wood);
@@ -528,7 +537,7 @@ export class PlinkoScene {
     if (!this.ui.canWrite) return ' · partie suspendue';
     if (!s) return '';
     if (s.factoryRemainingMs) return ' · service en cours';
-    if (s.repairTriggered && !s.repairPurchased) return ' · panne, voir le catalogue d’Azur';
+    if (s.repairTriggered && !s.repairPurchased) return s.plans.includes('azur.initial_repair') ? ' · panne, installer le plan sur la trappe de montage' : ' · panne, acheter le plan chez Azur';
     if (s.walletCents < s.selectedBetCents) return ' · solde insuffisant, usine accessible par l’escalier';
     if (s.pendingBalls.length >= CONFIG.maxBalls) return ' · 50 billes en cours';
     if (s.manualCooldownMs) return ' · patienter';
@@ -630,7 +639,9 @@ export class PlinkoScene {
     this.currentState = state; this.navigation.advance(delta, state.preferences.reducedMotion);
     if (active && !state.preferences.reducedMotion) this.environmentTime += delta;
     this.updateCamera(); this.updateRain();
-    for (const slot of MODULE_SLOTS) { const group = this.modules.get(slot.id)!, visible = (state.upgrades as readonly string[]).includes(slot.unlockId); if (visible !== group.visible) { group.visible = visible; this.renderer.shadowMap.needsUpdate = true; } }
+    for (const slot of MODULE_SLOTS) { const group = this.modules.get(slot.id)!, visible = (state.upgrades as readonly string[]).includes(slot.unlockId) || (slot.id === 'magnets' && !!this.ui.magnetsAvailable) || (slot.id === 'collector' && !!this.ui.collectorAvailable); if (visible !== group.visible) { group.visible = visible; this.renderer.shadowMap.needsUpdate = true; } }
+    this.magnets.update(state, this.ui.autoEnabled);
+    this.collector.update(state);
     this.element.dataset.modules = MODULE_SLOTS.filter(slot => this.modules.get(slot.id)!.visible).map(slot => slot.id).join(',');
     if (this.wallet !== state.walletCents) {
       this.wallet = state.walletCents; const canvas = this.counter.image as HTMLCanvasElement, ctx = canvas.getContext('2d')!;
@@ -647,6 +658,7 @@ export class PlinkoScene {
       const contact = contactStep(flight.elapsed / CONFIG.flightDuration);
       if (active && contact > previousContact && flight.elapsed < CONFIG.flightDuration) this.onContact(contact + point.x);
       const ball = state.pendingBalls.find(ball => ball.id === id);
+      if (ball && this.modules.get('magnets')!.visible) this.magnets.attraction(ball, point, flight.elapsed / CONFIG.flightDuration, state.preferences.reducedMotion);
       if (active && flight.elapsed >= CONFIG.flightDuration && onArrival(id)) {
         this.machine.remove(flight.mesh); this.flights.delete(id);
         if (ball) this.exitPulse[ball.exit] = 1;
@@ -666,6 +678,6 @@ export class PlinkoScene {
     this.render(); this.element.dataset.renderedView = this.navigation.moving ? 'moving' : this.navigation.target;
   }
   private addBall(ball: Ball) {
-    const mesh = new THREE.Mesh(this.ballGeometry, ball.bonus > 1 ? this.bonusMaterial : ball.origin === 'auto' ? this.autoMaterial : this.silver); this.machine.add(mesh); this.flights.set(ball.id, { mesh, points: pathToExit(ball.exit), elapsed: 0 });
+    const mesh = new THREE.Mesh(this.ballGeometry, ball.bonus > 1 ? this.bonusMaterial : ball.origin === 'collector' ? this.collectorMaterial : ball.origin === 'auto' ? this.autoMaterial : this.silver); this.machine.add(mesh); this.flights.set(ball.id, { mesh, points: pathToExit(ball.exit, Math.random, ball.magnetFrom), elapsed: 0 });
   }
 }

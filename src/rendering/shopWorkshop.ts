@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { AZUR } from '../navigation/shop';
 import type { AzurView } from '../navigation/shop';
 import { finishSurface, wovenRug } from './decor';
+import { PlanNotebook } from './notebook';
 
 export interface WorkshopTools {
   root: THREE.Group;
@@ -24,7 +25,7 @@ export interface WorkshopTools {
   register(object: THREE.Object3D, action: string, label: string, hint: number[], views?: AzurView[]): void;
   batch(root?: THREE.Group): void;
 }
-const allLab: AzurView[] = ['workshop', 'machine', 'prototypes', 'duplicator'];
+const allLab: AzurView[] = ['workshop', 'machine', 'prototypes', 'duplicator', 'plans'];
 const random = (n: number) => { const v = Math.sin(n * 127.1 + 31.7) * 43758.5; return v - Math.floor(v); };
 
 /** Trois volumes raccordés ; prototypes décoratifs sans aucun lien avec les achats. */
@@ -34,6 +35,7 @@ export class AzurWorkshop {
   readonly passage: THREE.Group;
   readonly shelf: THREE.Group;
   readonly switch: THREE.Group;
+  notebook!: PlanNotebook;
   private mint: THREE.MeshStandardMaterial;
   private cream: THREE.MeshStandardMaterial;
   private sage: THREE.MeshStandardMaterial;
@@ -61,7 +63,7 @@ export class AzurWorkshop {
     this.latch = b.box(this.backroom, 0.13, 0.07, 0.09, 2.39, 1.3, -10.01, this.brass);
     this.latch.userData.dynamic = true;
     this.brokenMachine(); this.benches(); this.instruments(); this.details();
-    this.benchDetails();
+    this.benchDetails(); this.planningDesk();
     for (const root of [this.backroom, this.passage, this.workshop]) b.batch(root);
   }
   private cable(g: THREE.Object3D, points: number[][], color = this.iron, radius = 0.012) {
@@ -158,7 +160,7 @@ export class AzurWorkshop {
     const b = this.b, radio = b.device(this.backroom, 'radio', 3.57, 1.17, -9.76, 1.1, this.sage, true); radio.rotation.y = -0.35;
     b.box(this.backroom, 1.0, 0.1, 0.6, 3.57, 1.1, -9.76, this.wood);
     for (const x of [3.2, 3.95]) b.box(this.backroom, 0.08, 1.05, 0.08, x, 0.53, -9.8, this.iron);
-    b.register(radio, 'secret-switch', 'Tourner le bouton de la radio', [3.3, 2.3, -9.55], ['backroom']);
+    radio.name = 'azur:secret-radio';
     b.batch(radio); return radio;
   }
   private brokenMachine() {
@@ -285,9 +287,9 @@ export class AzurWorkshop {
       b.tool(i % 2 ? left : right, ['driver', 'pliers', 'spanner'][i % 3] as 'driver' | 'pliers' | 'spanner', -2.9 + (i % 4) * 0.2, 1.14, 0.15, 0.75, -Math.PI / 2);
     }
     const back = b.group(2.9, 2.3, -18, this.workshop);
-    b.plaque(back, 0.74, 0.28, 0, 0, 0, ['RÉSERVE ↶']);
+    b.plaque(back, 0.74, 0.28, 0, 0, 0, ['BOUTIQUE ↶']);
     b.rod(this.workshop, [2.9, 2.49, -18.03], [2.9, 3.38, -18.03], 0.012, this.iron);
-    b.register(back, 'return-backroom', 'Retourner dans l’arrière-boutique', [2.9, 2.65, -17.8], allLab);
+    b.register(back, 'return-shop', 'Retourner dans la boutique — trajet automatique', [2.9, 2.65, -17.8], allLab);
   }
   private finger(parent: THREE.Object3D) {
     const b = this.b, g = b.group(-0.6, 1.12, 0.02, parent); g.name = 'azur:prototype:finger';
@@ -409,8 +411,6 @@ export class AzurWorkshop {
     }
     this.cable(this.workshop, [[-3.4, 0.04, -20], [-2.2, 0.035, -19.1], [-1.6, 0.04, -17.9], [-0.3, 0.04, -17.8]], this.iron, 0.018);
     this.cable(this.workshop, [[0.4, 0.03, -19], [1.3, 0.04, -20.5], [3.9, 0.04, -20.2], [4.8, 0.7, -20.2]], this.peach, 0.014);
-    const portal = b.box(this.passage, 1.5, 2.5, 0.015, 1.55, 1.25, -10.75, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
-    b.register(portal, 'enter-workshop', 'Entrer dans l’atelier caché', [1.55, 2.35, -10.5], ['backroom', 'discovery']);
   }
   private carton(parent: THREE.Object3D, x: number, y: number, z: number, size: number, open = false) {
     const b = this.b, g = b.group(x, y, z, parent), cardboard = b.material('#a08963');
@@ -461,6 +461,34 @@ export class AzurWorkshop {
     const tray = b.group(-1.5, 0.02, -17.75, this.workshop);
     b.box(tray, 0.48, 0.04, 0.33, 0, 0.02, 0, this.iron);
     for (let i = 0; i < 8; i++) b.cylinder(tray, 0.012, 0.05, -0.17 + i % 4 * 0.11, 0.055, -0.08 + Math.floor(i / 4) * 0.16, this.brass).rotation.z = 1.1;
+  }
+  private planningDesk() {
+    const b = this.b, desk = b.group(2.35, 0, -17.8, this.workshop); desk.name = 'azur:planning-desk';
+    b.box(desk, 1.6, 0.09, 1.08, 0, 0.94, 0, this.wood);
+    b.box(desk, 1.5, 0.15, 0.94, 0, 0.81, 0, this.cream);
+    for (const x of [-0.7, 0.7]) for (const z of [-0.43, 0.43]) b.box(desk, 0.075, 0.77, 0.075, x, 0.385, z, this.wood);
+    for (const x of [-0.39, 0.39]) {
+      b.box(desk, 0.7, 0.13, 0.04, x, 0.81, 0.49, this.sage);
+      b.box(desk, 0.13, 0.025, 0.045, x, 0.81, 0.525, this.brass);
+    }
+    b.box(desk, 1.45, 0.055, 0.055, 0, 0.23, -0.42, this.wood);
+    b.stool(this.workshop, 3.1, 0, -16.95);
+    this.notebook = new PlanNotebook(b, desk);
+    // Lampe articulée sur le bord gauche, sans masquer les dessins.
+    b.cylinder(desk, 0.09, 0.035, -0.69, 1.0, -0.35, this.sage);
+    b.rod(desk, [-0.69, 1.02, -0.35], [-0.84, 1.64, -0.4], 0.015, this.sage);
+    b.rod(desk, [-0.84, 1.64, -0.4], [-0.61, 1.88, -0.32], 0.018, this.sage);
+    for (const p of [[-0.69, 1.02, -0.35], [-0.84, 1.64, -0.4]]) b.cylinder(desk, 0.028, 0.035, ...p as [number, number, number], this.brass).rotation.x = Math.PI / 2;
+    b.cylinder(desk, 0.12, 0.1, -0.61, 1.86, -0.32, this.sage, 0.045);
+    b.cylinder(desk, 0.105, 0.008, -0.61, 1.805, -0.32, new THREE.MeshBasicMaterial({ color: '#ffe3a6' }));
+    const light = new THREE.PointLight('#ffdfac', 1.5, 2.4, 2); light.position.set(-0.5, 1.75, 0.05); desk.add(light); this.lights.push(light);
+    b.paperwork(desk, 0.05, 0.993, -0.1, 0.32, 0.14, -0.08);
+    b.rod(desk, [-0.56, 1.005, 0.5], [-0.2, 1.005, 0.5], 0.008, this.peach);
+    b.box(desk, 0.37, 0.012, 0.035, 0.38, 1.0, 0.51, this.cream);
+    b.box(desk, 1.45, 0.055, 0.055, 0, 0.61, 0.47, this.wood);
+    b.plaque(desk, 0.75, 0.1, 0, 0.61, 0.5, ['BUREAU DES PLANS · AZUR'], false);
+    b.register(desk, 'plans', 'Consulter le carnet des plans', [2.35, 1.3, -17.4], allLab);
+    b.batch(desk);
   }
   update(shelf: number, latch: number, inside: boolean) {
     this.backroom.visible = inside;

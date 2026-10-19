@@ -7,6 +7,8 @@ export const CONFIG = {
   maxBalls: 50,
   manualInterval: 500,
   autoInterval: 2000,
+  magnetRecharge: 5000,
+  collectorThreshold: 10,
   flightDuration: 3600,
   repairThreshold: 5000,
   factoryDuration: 60000,
@@ -60,16 +62,19 @@ export function atWorkbench(x: number, y: number, z: number) {
 export const VIEWS = {
   plinko: { x: 0.4, y: -0.05, z: 0, width: 44, height: 23.5, offsetX: 0.2, offsetY: 1.05, yaw: 0 },
   commandes: { x: 0, y: -5.1, z: 1, width: 12.8, height: 5.8, offsetX: 0, offsetY: 0.6, yaw: 0 },
+  montage: { x: -6.65, y: -4.65, z: 1, width: 4.8, height: 5.4, offsetX: 2.2, offsetY: 0.4, yaw: 0 },
+  collecteur: { x: 6.4, y: 0.6, z: 0.8, width: 4.1, height: 5.6, offsetX: 0, offsetY: 0.5, yaw: 0 },
   azur: { ...atWorkbench(11.2, -0.2, 0.2), width: 23, height: 17.6, offsetX: 0, offsetY: 1.2, yaw: WORKBENCH.yaw },
-  catalogue: { ...atWorkbench(10.9, -0.25, 2.2), width: 6.4, height: 5.8, offsetX: 0, offsetY: 6.5, yaw: WORKBENCH.yaw },
   reglages: { x: -7.15, y: 0, z: 1.5, width: 4, height: 5.4, offsetX: 0, offsetY: 0, yaw: 0 },
   historique: { x: 6.2, y: -5.35, z: 2.1, width: 2.8, height: 3.7, offsetX: 0, offsetY: 0, yaw: 0 },
 } as const;
 
-// Emplacements visuels. Les modules futurs n’ajoutent aucun achat ni règle économique.
+// Emplacements des modules installés ; les essais DEV restent disponibles séparément.
 export const MODULE_SLOTS = [
   { id: 'auto_launcher', unlockId: 'azur.auto_launcher', position: [-6.2, 3.05, 0.1] },
   { id: 'accounting_tray', unlockId: 'azur.accounting_tray', position: [6.05, -3.5, 0.4] },
+  { id: 'magnets', unlockId: 'azur.magnets', position: [0, -4.98, 0.7] },
+  { id: 'collector', unlockId: 'azur.collector', position: [6.4, 0.5, 0.25] },
   { id: 'duplicator', unlockId: 'azur.duplicator', position: [0, -6.7, 1.2] },
   { id: 'instability_counter', unlockId: 'azur.instability_counter', position: [6.1, 4.1, 0.05] },
   { id: 'ventilation', unlockId: 'azur.ventilation', position: [0, 7.05, -0.1] },
@@ -93,5 +98,7 @@ export const UPGRADES = {
   'azur.initial_repair': { name: 'Réparation initiale', price: 2500, description: 'Une machine remise sur pieds. Garantie verbale incluse.' },
   'azur.auto_launcher': { name: 'Doigt mécanique', price: 4000, description: 'Une bille gratuite toutes les 2 s. Il ne demande jamais de pause.' },
   'azur.accounting_tray': { name: 'Bac comptable', price: 1500, description: 'Les 100 derniers résultats. Pour mettre des chiffres sur le bruit.' },
+  'azur.magnets': { name: 'Aimants', price: 20000, description: 'Après 5 s de recharge, attirer la prochaine bille du Doigt vers une case voisine plus avantageuse. Aucun effet sur ×40.' },
+  'azur.collector': { name: 'Collecteur de ratés', price: 12000, description: 'Dix sorties sous ×1 des billes manuelles ou du Doigt offrent une bille gratuite de base 1.' },
 } as const;
 export type UpgradeId = keyof typeof UPGRADES;

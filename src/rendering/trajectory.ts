@@ -25,13 +25,17 @@ export function contactStep(progress: number): number {
   return Math.min(BOARD.rows, Math.max(0, Math.floor(Math.min(1, progress) * 16)));
 }
 
-export function pathToExit(exit: number, random: Random = Math.random): Point[] {
+export function pathToExit(exit: number, random: Random = Math.random, magnetFrom?: number): Point[] {
   if (!Number.isInteger(exit) || exit < 0 || exit > 14) throw new Error('Sortie invalide.');
-  const moves: number[] = Array.from({ length: 14 }, (_, i) => i < exit ? 1 : -1);
+  if (magnetFrom !== undefined && (!Number.isInteger(magnetFrom) || magnetFrom < 1 || magnetFrom > 13 || Math.abs(exit - magnetFrom) !== 1)) throw new Error('Attraction invalide.');
+  // Les treize premiers rebonds permettent les deux sorties. Le dernier est attiré
+  // vers le voisin : même grille, quatorze décisions, aucun saut entre compartiments.
+  const moves: number[] = Array.from({ length: magnetFrom === undefined ? 14 : 13 }, (_, i) => i < (magnetFrom === undefined ? exit : Math.min(exit, magnetFrom)) ? 1 : -1);
   for (let i = moves.length - 1; i > 0; i--) {
     const j = Math.floor(randomUnit(random) * (i + 1));
     [moves[i], moves[j]] = [moves[j], moves[i]];
   }
+  if (magnetFrom !== undefined) moves.push(Math.sign(exit - magnetFrom));
   const points: Point[] = [{ x: 0, y: BOARD.entryY, z: BOARD.ballZ }, { x: 0, y: BOARD.startY + BOARD.contactHeight, z: BOARD.ballZ }];
   let x = 0;
   for (let row = 0; row < 14; row++) {

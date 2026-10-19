@@ -2,17 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { STAIRS, CONFIG, EXITS, OUTCOMES } from '../src/config';
 import { Game, reconcile } from '../src/game/engine';
 import { newGame } from '../src/game/state';
+import type { UpgradeId } from '../src/config';
 import type { GameState } from '../src/game/state';
 import { drawOutcome } from '../src/game/outcomes';
+import { magnetExit } from '../src/game/magnets';
 import { parseSnapshot } from '../src/persistence/snapshot';
 import { BOARD, pathToExit, samplePath, pinPositions, contactStep } from '../src/rendering/trajectory';
 import { Departure, Navigation } from '../src/navigation/camera';
 import { AZUR, AZUR_POSES, AzurNavigation } from '../src/navigation/shop';
 import { factoryReward, factoryEventAt, factoryClock } from '../src/game/packing';
 
-function setup(random = () => 0) {
+function setup(random = () => 0, magnetsTrial = false, collectorTrial = false) {
   let saved = newGame(); let fail = false;
-  const game = new Game(saved, state => { if (fail) throw new Error('Quota'); saved = structuredClone(state); }, random);
+  const game = new Game(saved, state => { if (fail) throw new Error('Quota'); saved = structuredClone(state); }, random, { magnetsTrial, collectorTrial });
   game.writable = true;
   return { game, snapshot: () => structuredClone(saved), fail: (value: boolean) => { fail = value; } };
 }
@@ -27,16 +29,144 @@ function outcomeRandom(multiplier: number) {
   throw new Error('Multiplicateur absent du test.');
 }
 
-function atelier() {
-  const context = setup(() => 0.999);
+function buyInstalled(game: Game, id: UpgradeId) {
+  if (id === 'azur.initial_repair' && game.state.pendingBalls.length) return false;
+  return game.buyPlan(id) && game.installPlan(id);
+}
+
+function atelier(random = () => 0.999, magnetsTrial = false, collectorTrial = false) {
+  const context = setup(random, magnetsTrial, collectorTrial);
   const { game } = context;
   for (let i = 0; i < 2; i++) { const ball = game.launch()!; game.settle(ball.id); game.advance(500); }
-  expect(game.buy('azur.initial_repair')).toBe(true);
-  expect(game.buy('azur.auto_launcher')).toBe(true);
+  expect(buyInstalled(game, 'azur.initial_repair')).toBe(true);
+  expect(buyInstalled(game, 'azur.auto_launcher')).toBe(true);
   return context;
 }
 
 describe('Règles économiques et transactions', () => {
+  it('vend les Aimants à 200 et le Collecteur à 120, sans activer les plans avant montage', () => {
+    const { game } = atelier();
+    const poor = structuredClone(game.state); expect(game.buyPlan('azur.magnets')).toBe(false); expect(game.buyPlan('azur.collector')).toBe(false); expect(game.state).toEqual(poor);
+    // Fixture de salaires historiques cohérente avec le bilan monétaire, sans modifier les prix.
+    game.state.walletCents += 40000; game.state.stats.factoryIncome += 40000; const before = game.state.walletCents;
+    expect(game.buyPlan('azur.magnets')).toBe(true); expect(game.state.walletCents).toBe(before - 20000); expect(game.magnetsAvailable).toBe(false);
+    expect(game.buyPlan('azur.collector')).toBe(true); expect(game.state.walletCents).toBe(before - 32000); expect(game.collectorAvailable).toBe(false);
+    expect(game.buyPlan('azur.magnets')).toBe(false); expect(game.buyPlan('azur.collector')).toBe(false);
+    expect(game.installPlan('azur.magnets')).toBe(true); expect(game.installPlan('azur.collector')).toBe(true);
+    expect(game.state.walletCents).toBe(before - 32000); expect(game.state.plans).toEqual([]); expect(game.state.stats.upgradeExpenses).toBe(38500);
+    expect(game.magnetsAvailable).toBe(true); expect(game.collectorAvailable).toBe(true);
+    const resumed = new Game(parseSnapshot(JSON.stringify(game.state)), () => {});
+    expect(resumed.magnetsAvailable).toBe(true); expect(resumed.collectorAvailable).toBe(true); expect(resumed.autoEnabled).toBe(false);
+    expect(game.installPlan('azur.magnets')).toBe(false); expect(game.state.walletCents).toBe(before - 32000);
+  });
+  it('garde les prérequis des modules, sans exiger le Doigt pour le Collecteur', () => {
+    const { game } = setup(() => 0.999); game.state.walletCents += 40000; game.state.stats.factoryIncome += 40000;
+    expect(game.buyPlan('azur.magnets')).toBe(false); expect(game.buyPlan('azur.collector')).toBe(false);
+    for (let i = 0; i < 2; i++) { game.settle(game.launch()!.id); game.advance(500); }
+    buyInstalled(game, 'azur.initial_repair');
+    expect(game.buyPlan('azur.magnets')).toBe(false); expect(game.notice).toContain('Doigt');
+    expect(buyInstalled(game, 'azur.collector')).toBe(true); expect(game.collectorAvailable).toBe(true); expect(game.toggleAuto()).toBe(false);
+    expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state);
+  });
+  it('fait fonctionner les deux achats sans essai DEV et conserve les résultats antérieurs', () => {
+    let sample = 0.999; const { game } = atelier(() => sample); game.state.walletCents += 40000; game.state.stats.factoryIncome += 40000;
+    game.toggleAuto(); sample = 0; game.state.magnetCooldownMs = 0;
+    const before = game.launch('auto')!; expect(before).toMatchObject({ exit: 7, returnCents: 30 });
+    buyInstalled(game, 'azur.magnets'); buyInstalled(game, 'azur.collector');
+    expect(game.state.pendingBalls[0]).toEqual(before); expect(before.collectorEligible).toBeUndefined();
+    const attracted = game.launch('auto')!; expect(attracted).toMatchObject({ magnetFrom: 7, exit: 6, returnCents: 50, collectorEligible: true });
+    game.settle(before.id); expect(game.state.collectorCharge).toBe(0); game.settle(attracted.id); expect(game.state.collectorCharge).toBe(1);
+    game.stopAuto(); game.state.magnetCooldownMs = 0;
+    for (let i = 0; i < 9; i++) {
+      const manual = game.launch()!; expect(manual.exit).toBe(7); expect(manual.magnetFrom).toBeUndefined(); game.settle(manual.id); if (i < 8) game.advance(500);
+    }
+    expect(game.state.collectorCharge).toBe(10); game.advance(1); const reward = game.state.pendingBalls[0];
+    expect(reward).toMatchObject({ origin: 'collector', baseCents: 100, betCents: 0, exit: 7 }); expect(reward.magnetFrom).toBeUndefined(); expect(reward.collectorEligible).toBeUndefined();
+    game.settle(reward.id); expect(game.state.collectorCharge).toBe(0); expect(game.state.magnetCooldownMs).toBe(0);
+    expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state);
+  });
+  it('n’active pas un module acheté si l’écriture du montage échoue', () => {
+    const context = atelier(), { game } = context; game.state.walletCents += 40000; game.state.stats.factoryIncome += 40000;
+    game.buyPlan('azur.magnets'); const before = structuredClone(game.state); context.fail(true);
+    expect(game.installPlan('azur.magnets')).toBe(false); expect(game.state).toEqual(before); expect(game.magnetsAvailable).toBe(false);
+    context.fail(false); game.retrySave(); expect(game.installPlan('azur.magnets')).toBe(true); expect(game.state.walletCents).toBe(before.walletCents);
+    expect(game.magnetsAvailable).toBe(true);
+  });
+  it('migre le format 5 en conservant plans payés, réserve et paiements figés sans offrir de modules', () => {
+    let sample = 0.999; const { game } = atelier(() => sample, true, true);
+    game.buyPlan('azur.accounting_tray'); game.toggleAuto(); game.state.magnetCooldownMs = 0; sample = 0;
+    const ball = game.launch('auto')!; game.state.collectorCharge = 9;
+    const old = JSON.parse(JSON.stringify(game.state)); old.saveVersion = 5;
+    const migrated = parseSnapshot(JSON.stringify(old)); expect(migrated.plans).toEqual(['azur.accounting_tray']); expect(migrated.collectorCharge).toBe(9);
+    expect(migrated.pendingBalls[0]).toEqual(ball); const paid = reconcile(migrated).state;
+    expect(paid.walletCents).toBe(migrated.walletCents + ball.returnCents); expect(paid.collectorCharge).toBe(10);
+    const normal = new Game(paid, () => {}); normal.writable = true; normal.advance(10000);
+    expect(normal.magnetsAvailable).toBe(false); expect(normal.collectorAvailable).toBe(false); expect(normal.state.pendingBalls).toEqual([]); expect(normal.state.collectorCharge).toBe(10);
+    expect(reconcile(paid).state.walletCents).toBe(paid.walletCents);
+  });
+  it('valide les nouveaux identifiants, leur prix et la dépendance au Doigt dans le format 6', () => {
+    const { game } = atelier(); game.state.walletCents += 40000; game.state.stats.factoryIncome += 40000;
+    game.buyPlan('azur.magnets'); game.buyPlan('azur.collector'); const raw = JSON.stringify(game.state);
+    expect(parseSnapshot(raw)).toEqual(game.state);
+    for (const version of [1, 2, 3, 4, 5, 7]) { const bad = JSON.parse(raw); bad.saveVersion = version; expect(() => parseSnapshot(JSON.stringify(bad))).toThrow(); }
+    const noFinger = JSON.parse(raw); noFinger.upgrades = ['azur.initial_repair']; expect(() => parseSnapshot(JSON.stringify(noFinger))).toThrow('Doigt');
+    const wrongPrice = JSON.parse(raw); wrongPrice.walletCents++; wrongPrice.stats.upgradeExpenses--; expect(() => parseSnapshot(JSON.stringify(wrongPrice))).toThrow('dépenses');
+    const duplicate = JSON.parse(raw); duplicate.upgrades.push('azur.collector'); expect(() => parseSnapshot(JSON.stringify(duplicate))).toThrow('plans');
+  });
+  it('paie chaque plan une fois, puis installe sans débit ni activation anticipée', () => {
+    const { game } = setup(() => 0.999);
+    for (let i = 0; i < 2; i++) { game.settle(game.launch()!.id); game.advance(500); }
+    const wallet = game.state.walletCents;
+    expect(game.installPlan('azur.initial_repair')).toBe(false);
+    expect(game.buyPlan('azur.initial_repair')).toBe(true);
+    expect(game.state.walletCents).toBe(wallet - 2500); expect(game.state.repairPurchased).toBe(false);
+    expect(game.state.upgrades).toEqual([]); expect(game.state.plans).toEqual(['azur.initial_repair']);
+    expect(game.buyPlan('azur.initial_repair')).toBe(false); expect(game.buyPlan('azur.auto_launcher')).toBe(false);
+    expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state);
+    expect(game.installPlan('azur.initial_repair')).toBe(true); expect(game.state.repairPurchased).toBe(true);
+    expect(game.state.walletCents).toBe(wallet - 2500); expect(game.installPlan('azur.initial_repair')).toBe(false);
+    expect(game.buyPlan('azur.auto_launcher')).toBe(true); expect(game.toggleAuto()).toBe(false);
+    const paid = game.state.walletCents;
+    const resumed = new Game(parseSnapshot(JSON.stringify(game.state)), () => {}); resumed.writable = true;
+    expect(resumed.state.plans).toEqual(['azur.auto_launcher']); expect(resumed.installPlan('azur.auto_launcher')).toBe(true);
+    expect(resumed.state.walletCents).toBe(paid); expect(resumed.state.plans).toEqual([]); expect(resumed.toggleAuto()).toBe(true);
+    expect(parseSnapshot(JSON.stringify(resumed.state))).toEqual(resumed.state);
+  });
+  it('ne monte pas une réparation sur les billes en cours et conserve le plan', () => {
+    const { game } = setup(() => 0.999);
+    const a = game.launch()!; game.advance(500); const b = game.launch()!; game.advance(500); const c = game.launch()!;
+    game.settle(a.id); game.settle(b.id); expect(game.buyPlan('azur.initial_repair')).toBe(true);
+    const before = structuredClone(game.state); expect(game.installPlan('azur.initial_repair')).toBe(false); expect(game.state).toEqual(before);
+    game.settle(c.id); expect(game.installPlan('azur.initial_repair')).toBe(true);
+  });
+  it('annule achat ou montage en cas d’erreur d’écriture, sans perdre ni doubler le plan', () => {
+    const context = setup(() => 0.999), { game } = context;
+    for (let i = 0; i < 2; i++) { game.settle(game.launch()!.id); game.advance(500); }
+    const before = structuredClone(game.state); context.fail(true);
+    expect(game.buyPlan('azur.initial_repair')).toBe(false); expect(game.state).toEqual(before);
+    context.fail(false); game.retrySave(); game.buyPlan('azur.initial_repair'); const paid = structuredClone(game.state);
+    context.fail(true); expect(game.installPlan('azur.initial_repair')).toBe(false); expect(game.state).toEqual(paid);
+    context.fail(false); game.retrySave(); expect(game.installPlan('azur.initial_repair')).toBe(true);
+    expect(game.state.walletCents).toBe(paid.walletCents); expect(game.state.stats.upgradeExpenses).toBe(2500);
+  });
+  it('migre les modules déjà installés du format 4 sans achat ni démontage', () => {
+    const { game } = atelier(() => 0.999, true, true); game.state.collectorCharge = 7;
+    const old = JSON.parse(JSON.stringify(game.state)); old.saveVersion = 4; delete old.plans;
+    expect(parseSnapshot(JSON.stringify(old))).toEqual(game.state);
+    for (const version of [1, 2, 3]) {
+      const legacy = JSON.parse(JSON.stringify(newGame())); legacy.saveVersion = version; delete legacy.plans;
+      if (version < 3) delete legacy.factory.events;
+      expect(parseSnapshot(JSON.stringify(legacy)).plans).toEqual([]);
+    }
+  });
+  it('refuse plans inconnus, doublons, prix incohérents et déblocages anticipés à l’import', () => {
+    const { game } = atelier(); const raw = JSON.stringify(game.state);
+    for (const plans of [['azur.auto_launcher'], ['azur.unknown'], ['azur.accounting_tray', 'azur.accounting_tray'], ['azur.accounting_tray']]) {
+      expect(() => parseSnapshot(JSON.stringify({ ...JSON.parse(raw), plans }))).toThrow();
+    }
+    const premature = newGame(); premature.plans = ['azur.initial_repair']; expect(() => parseSnapshot(JSON.stringify(premature))).toThrow();
+    expect(game.buyPlan('azur.unknown' as UpgradeId)).toBe(false); expect(game.installPlan('azur.unknown' as UpgradeId)).toBe(false);
+  });
   it('démarre à 19,00 et conserve les fractions : mise 10, x0,3, net -7', () => {
     const { game } = setup();
     expect(game.state.walletCents).toBe(1900);
@@ -83,19 +213,19 @@ describe('Règles économiques et transactions', () => {
     game.advance(500); const third = game.launch()!;
     game.settle(second.id); expect(game.state.repairTriggered).toBe(true);
     expect(game.launch()).toBeUndefined();
-    expect(game.buy('azur.initial_repair')).toBe(false);
+    expect(buyInstalled(game, 'azur.initial_repair')).toBe(false);
     expect(game.settle(third.id)?.returnCents).toBe(4000);
-    expect(game.buy('azur.initial_repair')).toBe(true);
+    expect(buyInstalled(game, 'azur.initial_repair')).toBe(true);
     const wallet = game.state.walletCents;
-    expect(game.buy('azur.initial_repair')).toBe(false); expect(game.state.walletCents).toBe(wallet);
+    expect(buyInstalled(game, 'azur.initial_repair')).toBe(false); expect(game.state.walletCents).toBe(wallet);
     game.advance(500); expect(game.launch()).toBeDefined();
   });
   it('refuse les achats avant déblocage ou sans fonds', () => {
     const { game } = setup();
-    expect(game.buy('azur.auto_launcher')).toBe(false);
-    expect(game.buy('azur.accounting_tray')).toBe(false);
+    expect(buyInstalled(game, 'azur.auto_launcher')).toBe(false);
+    expect(buyInstalled(game, 'azur.accounting_tray')).toBe(false);
     game.state.repairTriggered = true;
-    expect(game.buy('azur.initial_repair')).toBe(false);
+    expect(buyInstalled(game, 'azur.initial_repair')).toBe(false);
     expect(game.state.walletCents).toBe(1900);
   });
   it('annule les mutations et suspend le jeu si la sauvegarde échoue', () => {
@@ -108,6 +238,212 @@ describe('Règles économiques et transactions', () => {
     context.fail(true); expect(game.settle(ball.id)).toBeUndefined(); expect(game.state).toEqual(inFlight);
     context.fail(false); game.retrySave(); game.settle(ball.id);
     expect(game.settle(ball.id)).toBeUndefined();
+  });
+});
+
+describe('Aimants en essai de développement', () => {
+  it('désactivés par défaut et avant réparation/Doigt, ne change jamais les manuelles', () => {
+    expect(setup(() => 0, true).game.magnetsAvailable).toBe(false);
+    let sample = 0.999;
+    const { game: ordinary } = atelier(() => sample); sample = 0;
+    ordinary.state.magnetCooldownMs = 0; ordinary.toggleAuto();
+    expect(ordinary.magnetsAvailable).toBe(false); expect(ordinary.launch('auto')?.magnetFrom).toBeUndefined();
+    sample = 0.999; const { game } = atelier(() => sample, true); sample = 0;
+    game.state.magnetCooldownMs = 0; game.toggleAuto();
+    const manual = game.launch()!;
+    expect(manual.multiplier).toBe(30); expect(manual.magnetFrom).toBeUndefined(); expect(game.state.magnetCooldownMs).toBe(0);
+    expect(game.launch('auto')).toMatchObject({ origin: 'auto', betCents: 0, baseCents: 100, magnetFrom: 7, exit: 6, multiplier: 50, returnCents: 50 });
+  });
+  it('recharge cinq secondes puis attire au prochain lancement : six secondes avec le Doigt actuel', () => {
+    let sample = 0.999; const { game } = atelier(() => sample, true); sample = 0;
+    game.toggleAuto(); const wallet = game.state.walletCents;
+    for (let i = 0; i < 59; i++) game.advance(100);
+    expect(game.state.pendingBalls).toHaveLength(2); expect(game.state.magnetCooldownMs).toBe(0);
+    expect(game.state.pendingBalls.every(ball => ball.magnetFrom === undefined)).toBe(true);
+    game.advance(100);
+    expect(game.state.pendingBalls.at(-1)).toMatchObject({ magnetFrom: 7, exit: 6, returnCents: 50 });
+    expect(game.state.magnetCooldownMs).toBe(5000); expect(game.state.walletCents).toBe(wallet);
+    for (let i = 0; i < 60; i++) game.advance(100);
+    expect(game.state.pendingBalls.filter(ball => ball.magnetFrom !== undefined)).toHaveLength(2);
+    expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state);
+  });
+  it('préserve la recharge à l’arrêt, masqué, en usine et à la reprise, sans accumulation', () => {
+    let sample = 0.999; const { game } = atelier(() => sample, true); sample = 0;
+    game.toggleAuto(); game.advance(1000); expect(game.state.magnetCooldownMs).toBe(4000);
+    game.stopAuto(); game.advance(60000); expect(game.state.magnetCooldownMs).toBe(4000);
+    game.toggleAuto(); game.advance(60000, false); expect(game.state.magnetCooldownMs).toBe(4000);
+    game.stopAuto(); expect(game.startFactory()).toBe(true); game.advance(60000, true, 'factory');
+    expect(game.state.magnetCooldownMs).toBe(4000);
+    const resumed = new Game(parseSnapshot(JSON.stringify(game.state)), () => {}, () => 0, { magnetsTrial: true }); resumed.writable = true;
+    expect(resumed.autoEnabled).toBe(false); resumed.advance(60000); expect(resumed.state.magnetCooldownMs).toBe(4000);
+    resumed.toggleAuto(); resumed.advance(4000); expect(resumed.state.magnetCooldownMs).toBe(5000);
+    expect(resumed.state.pendingBalls).toHaveLength(1); expect(resumed.state.pendingBalls[0].magnetFrom).toBe(7);
+  });
+  it('ne consomme rien sur ×40 et choisit les deux voisins du centre à 50/50', () => {
+    const untouched = () => { throw new Error('Aucun hasard supplémentaire sur ×40'); };
+    expect(magnetExit(0, untouched)).toBe(0); expect(magnetExit(14, untouched)).toBe(14);
+    expect(magnetExit(7, () => 0.499999)).toBe(6); expect(magnetExit(7, () => 0.5)).toBe(8);
+    for (let exit = 1; exit < 14; exit++) {
+      const target = magnetExit(exit, () => 0);
+      expect(Math.abs(target - exit)).toBe(1); expect(EXITS[target]).toBeGreaterThan(EXITS[exit]);
+    }
+    let sample = 0.999; const { game } = atelier(() => sample, true); game.toggleAuto(); game.state.magnetCooldownMs = 0;
+    expect(game.launch('auto')).toMatchObject({ multiplier: 4000, exit: 14 }); expect(game.state.magnetCooldownMs).toBe(0);
+    sample = 0; expect(game.launch('auto')?.magnetFrom).toBe(7); expect(game.state.magnetCooldownMs).toBe(5000);
+  });
+  it('fige attraction, bonus et retour au lancement ; recharge et paiement résistent aux échecs', () => {
+    let sample = 0.999; const { game, fail, snapshot } = atelier(() => sample, true); sample = 0;
+    game.toggleAuto(); game.state.magnetCooldownMs = 0; game.state.heatCount = 100; game.state.chargeReady = true; game.activateBonus();
+    const before = structuredClone(game.state); fail(true);
+    expect(game.launch('auto')).toBeUndefined(); expect(game.state).toEqual(before);
+    fail(false); game.retrySave(); game.toggleAuto(); const ball = game.launch('auto')!;
+    expect(ball).toMatchObject({ magnetFrom: 7, multiplier: 50, bonus: 2, returnCents: 100 });
+    expect(snapshot().magnetCooldownMs).toBe(5000); expect(parseSnapshot(JSON.stringify(snapshot())).pendingBalls[0]).toEqual(ball);
+    game.stopAuto(); game.advance(10000); const inFlight = structuredClone(game.state); fail(true);
+    expect(game.settle(ball.id)).toBeUndefined(); expect(game.state).toEqual(inFlight);
+    fail(false); game.retrySave(); expect(game.settle(ball.id)?.returnCents).toBe(100); expect(game.settle(ball.id)).toBeUndefined();
+    const resumed = reconcile(parseSnapshot(JSON.stringify(inFlight)));
+    expect(resumed.total).toBe(100); expect(resumed.state.history[0]).toMatchObject(ball); expect(reconcile(resumed.state).total).toBe(0);
+    expect(new Game(resumed.state, () => {}).magnetsAvailable).toBe(false);
+  });
+  it('refuse la 51e sans débit, hasard supplémentaire ni consommation de la recharge prête', () => {
+    let calls = 0; let sample = 0.999; const { game } = atelier(() => { calls++; return sample; }, true); sample = 0;
+    game.toggleAuto(); for (let i = 0; i < 50; i++) game.launch('auto'); game.state.magnetCooldownMs = 0;
+    const before = structuredClone(game.state), drawn = calls;
+    expect(game.launch('auto')).toBeUndefined(); expect(game.launch()).toBeUndefined(); expect(calls).toBe(drawn); expect(game.state).toEqual(before);
+    game.settle(game.state.pendingBalls[0].id); expect(game.launch('auto')?.magnetFrom).toBe(7);
+  });
+  it('importe les anciens snapshots et refuse recharges et attractions incohérentes', () => {
+    for (const version of [1, 2, 3]) {
+      const old = JSON.parse(JSON.stringify(newGame())); delete old.magnetCooldownMs;
+      old.saveVersion = version; if (version < 3) delete old.factory.events;
+      expect(parseSnapshot(JSON.stringify(old)).magnetCooldownMs).toBe(5000);
+    }
+    let sample = 0.999; const { game } = atelier(() => sample, true); sample = 0;
+    game.toggleAuto(); game.state.magnetCooldownMs = 0; game.launch('auto');
+    const invalid: ((s: GameState) => void)[] = [
+      s => { s.magnetCooldownMs = -1; }, s => { s.magnetCooldownMs = 5001; }, s => { s.magnetCooldownMs = 1.5; },
+      s => { s.pendingBalls[0].magnetFrom = 0; }, s => { s.pendingBalls[0].magnetFrom = 9; },
+      s => { s.pendingBalls[0].magnetFrom = 5; }, s => { s.pendingBalls[0].magnetFrom = 6; },
+    ];
+    for (const mutate of invalid) { const candidate = structuredClone(game.state); mutate(candidate); expect(() => parseSnapshot(JSON.stringify(candidate))).toThrow(); }
+  });
+  it('anime les treize décalages possibles sur la même grille, sans traverser les cloisons', () => {
+    const pins = pinPositions();
+    for (let from = 1; from < 14; from++) for (const side of [0, 0.999]) {
+      const target = magnetExit(from, () => side), path = pathToExit(target, () => 0.42, from);
+      expect(path).toHaveLength(17); expect(path.at(-1)!.x).toBeCloseTo((target - 7) * BOARD.spacingX);
+      const junction = path[14].x;
+      expect(Math.abs(junction - (from - 7) * BOARD.spacingX)).toBeCloseTo(BOARD.spacingX / 2);
+      expect(Math.abs(junction - path[15].x)).toBeCloseTo(BOARD.spacingX / 2);
+      for (let step = 0; step <= 800; step++) {
+        const p = samplePath(path, step / 800);
+        expect(Math.min(...pins.map(pin => Math.hypot(pin.x - p.x, pin.y - p.y)))).toBeGreaterThan(BOARD.ballRadius + BOARD.pinRadius - 0.025);
+        if (p.y < BOARD.dividerTop) expect(Math.abs(p.x - path.at(-1)!.x)).toBeLessThan(BOARD.spacingX / 2 - BOARD.ballRadius);
+      }
+    }
+  });
+});
+
+describe('Collecteur de ratés en essai de développement', () => {
+  it('reste désactivé par défaut, exige la réparation et ne requalifie pas un ancien lancement', () => {
+    expect(setup(() => 0, false, true).game.collectorAvailable).toBe(false);
+    let sample = 0.999; const normal = atelier(() => sample); sample = 0;
+    const old = normal.game.launch()!; expect(old.collectorEligible).toBeUndefined();
+    const trial = new Game(normal.game.state, () => {}, () => 0, { collectorTrial: true }); trial.writable = true;
+    trial.settle(old.id); expect(trial.state.collectorCharge).toBe(0);
+    expect(trial.collectorAvailable).toBe(true); expect(trial.launch('collector')).toBeUndefined();
+  });
+  it('dix ratés manuels donnent une seule bille gratuite, sans Doigt et sans auto-recharge', () => {
+    let sample = 0.999; const { game, snapshot } = setup(() => sample, false, true);
+    for (let i = 0; i < 2; i++) { game.settle(game.launch()!.id); game.advance(500); }
+    buyInstalled(game, 'azur.initial_repair'); sample = 0;
+    expect(game.state.upgrades).not.toContain('azur.auto_launcher');
+    for (let i = 0; i < 10; i++) {
+      const ball = game.launch()!; expect(ball.collectorEligible).toBe(true);
+      expect(game.state.collectorCharge).toBe(i); game.settle(ball.id); expect(game.settle(ball.id)).toBeUndefined();
+      expect(game.state.collectorCharge).toBe(i + 1); if (i < 9) game.advance(500);
+    }
+    const wallet = game.state.walletCents; game.advance(1);
+    const reward = game.state.pendingBalls[0]; expect(reward).toMatchObject({ origin: 'collector', betCents: 0, baseCents: 100, multiplier: 30, returnCents: 30 });
+    expect(reward.collectorEligible).toBeUndefined(); expect(game.state.collectorCharge).toBe(0); expect(game.state.walletCents).toBe(wallet);
+    expect(snapshot().pendingBalls[0]).toEqual(reward); expect(game.settle(reward.id)?.netCents).toBe(30);
+    expect(game.state.collectorCharge).toBe(0); expect(game.state.stats.freeProduction).toBe(30);
+    expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state); game.advance(10000); expect(game.state.pendingBalls).toHaveLength(0);
+  });
+  it('compte les sorties finales du Doigt, pas les remboursements ni le retour bonifié', () => {
+    let sample = 0.999; const { game } = atelier(() => sample, true, true); game.toggleAuto();
+    sample = 0.9; game.settle(game.launch('auto')!.id); expect(game.state.collectorCharge).toBe(0); // ×1
+    sample = 0; game.settle(game.launch('auto')!.id); expect(game.state.collectorCharge).toBe(1);
+    game.state.magnetCooldownMs = 0; sample = 0.7; const attracted = game.launch('auto')!;
+    expect(attracted).toMatchObject({ magnetFrom: 8, multiplier: 100 }); game.settle(attracted.id); expect(game.state.collectorCharge).toBe(1);
+    game.state.chargeReady = true; game.state.heatCount = 100; game.activateBonus();
+    const doubled = game.launch('auto')!; expect(doubled.returnCents).toBe(100); game.settle(doubled.id); expect(game.state.collectorCharge).toBe(2);
+  });
+  it('garde une récompense au plafond et réserve la place libérée avant le Doigt', () => {
+    let sample = 0.999; let draws = 0; const { game } = atelier(() => { draws++; return sample; }, false, true); sample = 0; game.toggleAuto();
+    for (let i = 0; i < 50; i++) game.launch('auto'); game.state.collectorCharge = 10;
+    const before = structuredClone(game.state), count = draws;
+    expect(game.launch('collector')).toBeUndefined(); expect(game.state).toEqual(before); expect(draws).toBe(count);
+    game.advance(10); expect(game.state.collectorCharge).toBe(10); expect(game.state.pendingBalls).toHaveLength(50);
+    game.settle(game.state.pendingBalls[0].id); expect(game.state.collectorCharge).toBe(10); game.advance(1);
+    expect(game.state.pendingBalls).toHaveLength(50); expect(game.state.pendingBalls.filter(ball => ball.origin === 'collector')).toHaveLength(1);
+    expect(game.state.collectorCharge).toBe(0); expect(parseSnapshot(JSON.stringify(game.state)).pendingBalls).toHaveLength(50);
+  });
+  it('suspend la récompense hors jeu actif, dans l’usine et lorsque l’essai est désactivé', () => {
+    const { game } = atelier(() => 0.999, false, true); game.state.collectorCharge = 10;
+    game.advance(50000, false); expect(game.state.collectorCharge).toBe(10); expect(game.state.pendingBalls).toHaveLength(0);
+    game.startFactory(); game.advance(60000, true, 'factory'); expect(game.state.collectorCharge).toBe(10);
+    const disabled = new Game(game.state, () => {}, () => 0); disabled.writable = true; disabled.advance(50000);
+    expect(disabled.state.collectorCharge).toBe(10); expect(disabled.launch('collector')).toBeUndefined();
+    game.advance(1); expect(game.state.pendingBalls[0].origin).toBe('collector');
+  });
+  it('annule le règlement ou le lancement refusé par la sauvegarde, sans perdre la récompense', () => {
+    let sample = 0.999; const { game, fail, snapshot } = atelier(() => sample, false, true); sample = 0; game.state.collectorCharge = 9;
+    const ball = game.launch()!, before = structuredClone(game.state); fail(true);
+    expect(game.settle(ball.id)).toBeUndefined(); expect(game.state).toEqual(before);
+    fail(false); game.retrySave(); game.settle(ball.id); expect(game.state.collectorCharge).toBe(10);
+    const saved = snapshot(); fail(true); game.advance(1); expect(game.state.collectorCharge).toBe(10); expect(snapshot()).toEqual(saved);
+    expect(game.state.pendingBalls).toHaveLength(0); fail(false); game.retrySave(); game.advance(1);
+    expect(game.state.pendingBalls.filter(ball => ball.origin === 'collector')).toHaveLength(1); expect(game.state.collectorCharge).toBe(0);
+  });
+  it('réconcilie les contributions et la récompense figées sans hasard ni nouveau lancement', () => {
+    let sample = 0.999; const { game } = atelier(() => sample, false, true); sample = 0;
+    game.state.collectorCharge = 9; game.launch();
+    const resumed = reconcile(parseSnapshot(JSON.stringify(game.state))); expect(resumed.state.collectorCharge).toBe(10); expect(resumed.count).toBe(1);
+    expect(reconcile(resumed.state).state.collectorCharge).toBe(10); expect(resumed.state.pendingBalls).toHaveLength(0);
+    const next = new Game(resumed.state, () => {}, () => 0, { collectorTrial: true, magnetsTrial: true }); next.writable = true;
+    next.state.chargeReady = true; next.state.heatCount = 100; next.activateBonus(); next.state.magnetCooldownMs = 0;
+    next.advance(1); const reward = next.state.pendingBalls[0]; expect(reward).toMatchObject({ origin: 'collector', bonus: 2, returnCents: 60 }); expect(reward.magnetFrom).toBeUndefined();
+    const paid = reconcile(parseSnapshot(JSON.stringify(next.state))); expect(paid.total).toBe(60); expect(paid.state.collectorCharge).toBe(0);
+    expect(reconcile(paid.state).total).toBe(0); expect(parseSnapshot(JSON.stringify(paid.state))).toEqual(paid.state);
+    next.resetProgress(); expect(next.state.collectorCharge).toBe(0); expect(next.state.pendingBalls).toHaveLength(0);
+  });
+  it('migre les formats 1/2/3 sans charge inventée et refuse les contributions incohérentes', () => {
+    for (const version of [1, 2, 3]) {
+      const old = JSON.parse(JSON.stringify(newGame())); old.saveVersion = version; delete old.collectorCharge;
+      if (version < 3) delete old.factory.events;
+      const migrated = parseSnapshot(JSON.stringify(old)); expect(migrated.saveVersion).toBe(6); expect(migrated.collectorCharge).toBe(0);
+    }
+    let sample = 0.999; const { game } = atelier(() => sample, false, true); sample = 0; game.launch();
+    for (const charge of [-1, 11, 0.5, null]) { const candidate = JSON.parse(JSON.stringify(game.state)); candidate.collectorCharge = charge; expect(() => parseSnapshot(JSON.stringify(candidate))).toThrow(); }
+    const candidate = JSON.parse(JSON.stringify(game.state)); candidate.pendingBalls[0].origin = 'collector'; candidate.pendingBalls[0].betCents = 0; candidate.pendingBalls[0].returnCents = 30;
+    expect(() => parseSnapshot(JSON.stringify(candidate))).toThrow('contribution au Collecteur');
+    const old = JSON.parse(JSON.stringify(game.state)); old.saveVersion = 3; expect(() => parseSnapshot(JSON.stringify(old))).toThrow('Collecteur dans un ancien format');
+  });
+  it('migre une vraie partie du format 3 avec gains figés et programme d’usine déjà en cours', () => {
+    let sample = 0.999; const { game } = atelier(() => sample, true); sample = 0;
+    game.state.heatCount = 100; game.state.chargeReady = true; game.activateBonus(); game.toggleAuto(); game.state.magnetCooldownMs = 0;
+    game.launch('auto'); game.launch();
+    const old = JSON.parse(JSON.stringify(game.state)); old.saveVersion = 3; delete old.collectorCharge;
+    const migrated = parseSnapshot(JSON.stringify(old));
+    expect(migrated).toEqual({ ...game.state, saveVersion: 6, collectorCharge: 0 });
+    const resumed = reconcile(migrated); expect(resumed.total).toBe(160); expect(reconcile(resumed.state).total).toBe(0);
+    const working = new Game(resumed.state, () => {}, () => 0.5); working.writable = true; working.startFactory(); working.advance(12345, true, 'factory');
+    const previous = JSON.parse(JSON.stringify(working.state)); previous.saveVersion = 3; delete previous.collectorCharge;
+    const service = parseSnapshot(JSON.stringify(previous));
+    expect(service.factory).toEqual(working.state.factory); expect(service.factoryRemainingMs).toBe(working.state.factoryRemainingMs);
+    expect(service.walletCents).toBe(working.state.walletCents); expect(service.history).toEqual(working.state.history); expect(service.bonusRemainingMs).toBe(working.state.bonusRemainingMs);
   });
 });
 
@@ -313,7 +649,7 @@ describe('Tri des billes à l’usine', () => {
   });
   it('migration des anciennes sauvegardes : solde inchangé et ancien service terminé une fois', () => {
     const old = { ...newGame(), saveVersion: 1, factoryRemainingMs: 8000 } as Record<string, unknown>; delete old.factory;
-    const migrated = parseSnapshot(JSON.stringify(old)); expect(migrated.saveVersion).toBe(3); expect(migrated.factory.legacy).toBe(true);
+    const migrated = parseSnapshot(JSON.stringify(old)); expect(migrated.saveVersion).toBe(6); expect(migrated.factory.legacy).toBe(true);
     const game = new Game(migrated, () => {}); game.writable = true;
     expect(game.hitFactoryBall(1)).toBe(false); game.advance(8000, true, 'factory');
     expect(game.state.walletCents).toBe(3400); expect(parseSnapshot(JSON.stringify(game.state))).toBeDefined();
@@ -403,7 +739,7 @@ describe('Événements du tapis d’usine', () => {
   it('migre un service du format 2 sans lui ajouter un événement en cours de route', () => {
     const { game } = setup(() => 0.5); game.startFactory(); game.state.factory.events = []; game.advance(17001, true, 'factory'); game.hitFactoryBall(game.state.factory.balls[0].id);
     const previous = JSON.parse(JSON.stringify(game.state)); previous.saveVersion = 2; delete previous.factory.events;
-    const migrated = parseSnapshot(JSON.stringify(previous)); expect(migrated.saveVersion).toBe(3); expect(migrated.factory.events).toEqual([]);
+    const migrated = parseSnapshot(JSON.stringify(previous)); expect(migrated.saveVersion).toBe(6); expect(migrated.factory.events).toEqual([]);
     expect(migrated.walletCents).toBe(game.state.walletCents); expect(migrated.factory.greyHits).toBe(1); expect(migrated.factory.balls).toEqual(game.state.factory.balls);
     const resumed = new Game(migrated, () => {}, () => 0.5); resumed.writable = true; resumed.advance(migrated.factoryRemainingMs, true, 'factory');
     expect(resumed.state.walletCents).toBe(1950); resumed.startFactory(); expect(resumed.state.factory.events).toHaveLength(3);
@@ -440,9 +776,9 @@ describe('Navigation indépendante de la production', () => {
     }
     expect(nav.moving).toBe(false); expect(nav.pose).toEqual(AZUR_POSES.backroom);
   });
-  it('déverrouille avant le coulissement, ignore les clics répétés et attend la sélection du passage', () => {
+  it('déverrouille avant le coulissement et refuse les commandes pendant le mouvement', () => {
     const nav = new AzurNavigation(); nav.go('backroom', true); nav.advance(0, true);
-    expect(nav.go('workshop', true)).toBe(false); expect(nav.go('discovery', false)).toBe(false);
+    expect(nav.go('workshop', false)).toBe(false); expect(nav.go('discovery', false)).toBe(false);
     nav.go('discovery', true); nav.advance(175);
     expect(nav.latch).toBeCloseTo(0.5); expect(nav.shelf).toBe(0); expect(nav.go('discovery', true)).toBe(false);
     nav.advance(175); expect(nav.latch).toBe(1); expect(nav.shelf).toBe(0);
@@ -450,6 +786,38 @@ describe('Navigation indépendante de la production', () => {
     nav.advance(2600); expect(nav.secretOpen).toBe(true); expect(nav.view).toBe('discovery'); expect(nav.moving).toBe(false);
     nav.advance(60000); expect(nav.view).toBe('discovery');
     expect(nav.go('workshop', false)).toBe(false); expect(nav.go('workshop', true)).toBe(true);
+  });
+  it('enchaîne tout le trajet vers l’atelier en une commande depuis chaque cadrage public', () => {
+    for (const view of ['entrance', 'counter', 'devis'] as const) {
+      const nav = new AzurNavigation(); if (view !== 'entrance') { nav.go(view); nav.advance(0, true); }
+      const before = structuredClone(nav.pose); expect(nav.go('workshop')).toBe(false); expect(nav.pose).toEqual(before);
+      expect(nav.go('workshop', true)).toBe(true); let previous = nav.pose.position;
+      let unlocked = false, opened = false, crossed = false, elapsed = 0;
+      while (nav.moving && elapsed < 20000) {
+        expect(nav.go('workshop', true)).toBe(false); expect(nav.go('entrance', true)).toBe(false);
+        nav.advance(20); elapsed += 20; const p = nav.pose.position;
+        expect(p.y).toBe(AZUR.eyeHeight); expect(Math.hypot(p.x - previous.x, p.z - previous.z)).toBeLessThan(0.09);
+        if (nav.latch === 1) unlocked = true;
+        if (nav.shelf > 0) { expect(unlocked).toBe(true); opened = true; }
+        if (p.z < -4.2 && p.z > -4.6) expect(nav.door).toBe(1);
+        if (p.z < AZUR.passage.start && p.z > AZUR.passage.end) {
+          expect(nav.shelf).toBe(1); expect(p.x).toBeGreaterThan(AZUR.passage.left + 0.2); expect(p.x).toBeLessThan(AZUR.passage.right - 0.2); crossed = true;
+        }
+        previous = p;
+      }
+      expect([unlocked, opened, crossed]).toEqual([true, true, true]); expect(nav.moving).toBe(false); expect(nav.pose).toEqual(AZUR_POSES.workshop);
+      expect(elapsed).toBeLessThan(16000);
+    }
+  });
+  it('revient directement à la boutique, réentre par le passage ouvert et réduit le trajet entier', () => {
+    const nav = new AzurNavigation(); nav.go('workshop', true); nav.advance(0, true);
+    expect(nav.pose).toEqual(AZUR_POSES.workshop); expect(nav.secretOpen).toBe(true);
+    nav.go('prototypes', true); nav.advance(0, true); expect(nav.go('entrance', true)).toBe(true);
+    while (nav.moving) { nav.advance(20); if (nav.pose.position.z < -4.4) expect(nav.door).toBe(1); }
+    expect(nav.pose).toEqual(AZUR_POSES.entrance); expect(nav.door).toBe(0);
+    expect(nav.go('workshop', true)).toBe(true); nav.advance(0, true); expect(nav.pose).toEqual(AZUR_POSES.workshop);
+    expect(nav.go('entrance', true)).toBe(true); nav.advance(0, true); expect(nav.pose).toEqual(AZUR_POSES.entrance);
+    nav.reset(); expect(nav.shelf + nav.door + nav.latch).toBe(0); expect(nav.moving).toBe(false);
   });
   it('parcourt le vrai couloir, garde sa hauteur et revient par le passage ouvert', () => {
     const nav = new AzurNavigation(); nav.go('backroom', true); nav.advance(0, true); nav.go('discovery', true); nav.advance(0, true);
@@ -460,7 +828,7 @@ describe('Navigation indépendante de la production', () => {
       }
     };
     nav.go('workshop', true); while (nav.moving) { nav.advance(20); check(); }
-    for (const view of ['machine', 'prototypes', 'duplicator', 'workshop'] as const) {
+    for (const view of ['machine', 'plans', 'prototypes', 'duplicator', 'workshop'] as const) {
       expect(nav.go(view, true)).toBe(true); while (nav.moving) { nav.advance(20); check(); }
       expect(nav.pose).toEqual(AZUR_POSES[view]);
     }

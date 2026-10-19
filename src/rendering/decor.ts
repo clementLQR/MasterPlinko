@@ -402,7 +402,7 @@ export class CaveDecor {
       this.box(root, 0.56, 0.06, 0.1, 8.6, -2.77 - i * 0.69, 1.13, this.brass);
       this.box(root, 0.35, 0.11, 0.015, 8.04, -2.77 - i * 0.69, 1.08, this.paper);
     }
-    // Petites fournitures derrière le catalogue : les zones d'achat restent entièrement dégagées.
+    // Petites fournitures de l’établi ; aucun livre ni commande d’achat dans la cave.
     for (let i = 0; i < 13; i++) {
       const x = 7.6 + i * 0.58, y = 1.45 - i % 3 * 0.17;
       this.rod(root, [x, y, -0.93], [x, y - 1.1, -0.93], 0.035, this.iron);
