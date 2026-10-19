@@ -12,7 +12,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     launchOptions: {
       channel: 'chrome',
-      args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+      args: process.env.PLINKO_GPU === '1' ? [] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
     },
   },
   webServer: {

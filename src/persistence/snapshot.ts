@@ -1,6 +1,9 @@
 import { CONFIG, EXITS, UPGRADES } from '../config';
 import type { UpgradeId } from '../config';
 import type { Ball, GameState } from '../game/state';
+import { factoryClock, factorySpawnTime, newFactory } from '../game/packing';
+import type { FactoryEvent } from '../game/packing';
+import { FACTORY_EVENTS } from '../config';
 
 function requireValid(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`Sauvegarde invalide : ${message}`);
@@ -15,7 +18,7 @@ function validateBall(value: unknown, nextSequence: number, history: boolean): a
   requireValid(integer(value.betCents, 0, CONFIG.maxBet) && integer(value.baseCents, 100, CONFIG.maxBet), 'mise ou base.');
   requireValid(value.origin === 'auto' ? value.betCents === 0 && value.baseCents === 100 : value.betCents >= 100 && value.betCents % 100 === 0 && value.baseCents === value.betCents, 'cohérence de la mise.');
   requireValid(integer(value.exit, 0, 14) && value.multiplier === EXITS[value.exit], 'sortie et multiplicateur.');
-  requireValid(value.bonus === 1 || value.bonus === 10, 'facteur de Décharge.');
+  requireValid(value.bonus === 1 || value.bonus === CONFIG.bonusFactor || value.bonus === 10, 'facteur de Décharge.');
   requireValid(integer(value.returnCents) && value.returnCents === Math.round(value.baseCents * (value.multiplier as number) / 100) * value.bonus, 'retour figé.');
   if (history) requireValid(value.netCents === value.returnCents - value.betCents, 'bénéfice net.');
 }
@@ -25,7 +28,9 @@ export function parseSnapshot(raw: string): GameState {
   let value: unknown;
   try { value = JSON.parse(raw); } catch { throw new Error('Le fichier ne contient pas un JSON valide.'); }
   requireValid(object(value), 'snapshot manquant.');
-  requireValid(value.saveVersion === 1, 'format non pris en charge. Votre partie actuelle est conservée.');
+  requireValid(value.saveVersion === 1 || value.saveVersion === 2 || value.saveVersion === 3, 'format non pris en charge. Votre partie actuelle est conservée.');
+  const legacy = value.saveVersion === 1;
+  const classic = value.saveVersion !== 3;
   requireValid(value.profile === 'prototype', 'configuration inconnue.');
   requireValid(integer(value.walletCents), 'solde.');
   requireValid(integer(value.selectedBetCents, 100, 1000) && value.selectedBetCents % 100 === 0, 'mise sélectionnée.');
@@ -42,13 +47,50 @@ export function parseSnapshot(raw: string): GameState {
   requireValid(value.repairPurchased || value.upgrades.length === 0, 'atelier verrouillé.');
   requireValid(!balls.some(ball => ball.origin === 'auto') || value.upgrades.includes('azur.auto_launcher'), 'automatisation non achetée.');
   requireValid(integer(value.heatCount, 0, CONFIG.chargeCount) && typeof value.chargeReady === 'boolean' && value.chargeReady === (value.heatCount === CONFIG.chargeCount), 'charge.');
-  requireValid(integer(value.bonusRemainingMs, 0, CONFIG.bonusDuration) && integer(value.factoryRemainingMs, 0, CONFIG.factoryDuration) && integer(value.manualCooldownMs, 0, CONFIG.manualInterval), 'durées actives.');
+  requireValid(integer(value.bonusRemainingMs, 0, CONFIG.bonusDuration) && integer(value.factoryRemainingMs, 0, legacy ? 15000 : CONFIG.factoryDuration) && integer(value.manualCooldownMs, 0, CONFIG.manualInterval), 'durées actives.');
   requireValid(value.bonusRemainingMs === 0 || (!value.chargeReady && value.heatCount === 0), 'charge pendant Décharge.');
   requireValid(value.factoryRemainingMs === 0 || value.pendingBalls.length === 0, 'billes pendant le service.');
   requireValid(object(value.stats), 'statistiques.');
   const stats = value.stats;
   for (const key of ['launched', 'settled', 'paidBets', 'grossReturns', 'freeProduction', 'factoryIncome', 'upgradeExpenses']) requireValid(integer(stats[key]), `statistique ${key}.`);
   requireValid(integer(stats.paidProfit, -Number.MAX_SAFE_INTEGER), 'bénéfice cumulé.');
+  if (legacy) {
+    requireValid((stats.factoryIncome as number) % 1500 === 0, 'anciens salaires.');
+    value.factory = { ...newFactory(), status: value.factoryRemainingMs > 0 ? 'active' : 'idle', legacy: value.factoryRemainingMs > 0 };
+  }
+  requireValid(object(value.factory), 'service d’usine manquant.');
+  const f = value.factory;
+  if (classic && !legacy) {
+    requireValid(!Object.hasOwn(f, 'events'), 'événements dans un ancien format.');
+    f.events = [];
+  }
+  value.saveVersion = 3;
+  requireValid(Array.isArray(f.events) && (f.events.length === 0 || f.events.length === 3), 'programme des événements.');
+  for (let index = 0; index < f.events.length; index++) {
+    const event = f.events[index];
+    requireValid(object(event) && typeof event.kind === 'string' && Object.hasOwn(FACTORY_EVENTS, event.kind) && integer(event.startsAtMs, 10000 + index * 16000, 14000 + index * 16000), 'événement d’usine.');
+  }
+  const events = f.events as FactoryEvent[];
+  requireValid(new Set(events.map(event => event.kind)).size === events.length, 'événement dupliqué.');
+  requireValid(['idle', 'active', 'success', 'exploded'].includes(f.status as string) && typeof f.legacy === 'boolean', 'état du service.');
+  const maxArrivals = Math.floor(CONFIG.factoryDuration * (classic ? 1 : 2) / CONFIG.factorySpawnInterval) + 1;
+  requireValid(integer(f.nextId, 1, maxArrivals + 1) && integer(f.greyHits, 0, f.nextId - 1) && typeof f.spawnInMs === 'number' && integer(f.spawnInMs * 2, 0, CONFIG.factorySpawnInterval * 2), 'compteurs du service.');
+  requireValid(Array.isArray(f.balls) && f.balls.length <= Math.ceil(CONFIG.factoryTravelDuration / CONFIG.factorySpawnInterval * (classic ? 1 : 2)), 'billes d’usine.');
+  requireValid((f.status === 'active') === (value.factoryRemainingMs > 0), 'durée et état du service.');
+  const elapsed = CONFIG.factoryDuration - value.factoryRemainingMs;
+  const produced = factoryClock(events, elapsed, 'supply');
+  if (f.legacy) requireValid(events.length === 0 && value.factoryRemainingMs <= 15000 && f.greyHits === 0 && f.nextId === 1 && f.spawnInMs === 0 && f.balls.length === 0 && ['active', 'success'].includes(f.status as string), 'ancien service.');
+  else if (f.status === 'active') {
+    requireValid(f.nextId === (elapsed === 0 ? 1 : Math.floor(produced / CONFIG.factorySpawnInterval) + 2), 'séquence d’usine.');
+    requireValid(f.spawnInMs === (elapsed === 0 ? 0 : (f.nextId - 1) * CONFIG.factorySpawnInterval - produced), 'cadence d’usine.');
+  }
+  if (f.status !== 'active') requireValid(f.balls.length === 0, 'billes après service.');
+  if (f.status === 'idle') requireValid(events.length === 0 && !f.legacy && f.greyHits === 0 && f.nextId === 1 && f.spawnInMs === 0, 'poste au repos.');
+  for (const ball of f.balls) {
+    requireValid(object(ball) && integer(ball.id, 1, f.nextId - 1) && ['grey', 'red'].includes(ball.kind as string) && integer(ball.lane, 0, 3) && typeof ball.ageMs === 'number' && integer(ball.ageMs * 2, 0, CONFIG.factoryTravelDuration * 2 - 1), 'bille d’usine invalide.');
+    requireValid(ball.ageMs === factoryClock(events, elapsed, 'belt') - factoryClock(events, factorySpawnTime(events, ball.id), 'belt'), 'position d’usine.');
+  }
+  requireValid(new Set(f.balls.map(ball => ball.id)).size === f.balls.length && f.greyHits + f.balls.length <= f.nextId - 1, 'bille d’usine dupliquée.');
   const s = value as unknown as GameState;
   requireValid(s.stats.launched === s.nextBallSequence - 1 && s.stats.settled === s.stats.launched - s.pendingBalls.length, 'compteurs de billes.');
   requireValid(s.history.length === Math.min(CONFIG.historyLimit, s.stats.settled), 'taille de l’historique.');
@@ -57,7 +99,7 @@ export function parseSnapshot(raw: string): GameState {
   requireValid(s.stats.paidBets >= pendingBets && s.stats.freeProduction <= s.stats.grossReturns && s.stats.paidProfit === s.stats.grossReturns - s.stats.freeProduction - (s.stats.paidBets - pendingBets), 'bilan des retours.');
   requireValid(s.stats.upgradeExpenses === s.upgrades.reduce((sum, id: UpgradeId) => sum + UPGRADES[id].price, 0), 'dépenses d’atelier.');
   requireValid(s.repairTriggered === (s.stats.grossReturns >= CONFIG.repairThreshold), 'seuil de panne.');
-  requireValid(s.stats.factoryIncome % CONFIG.factorySalary === 0, 'salaires.');
+  requireValid(s.stats.factoryIncome % CONFIG.factoryGreyReward === 0, 'salaires.');
   requireValid(s.history.reduce((sum, ball) => sum + ball.returnCents, 0) <= s.stats.grossReturns, 'retours de l’historique.');
   requireValid(object(value.preferences) && typeof value.preferences.sound === 'boolean' && typeof value.preferences.reducedMotion === 'boolean' && ['normal', 'low'].includes(value.preferences.quality as string), 'préférences.');
   requireValid(typeof value.savedAt === 'string' && value.savedAt.length <= 40 && Number.isFinite(Date.parse(value.savedAt)), 'date.');

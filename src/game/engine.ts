@@ -2,7 +2,8 @@ import { CONFIG, UPGRADES } from '../config';
 import type { UpgradeId } from '../config';
 import { drawOutcome } from './outcomes';
 import type { Random } from './outcomes';
-import { isBroken } from './state';
+import { isBroken, newGame } from './state';
+import { advanceFactory, factoryReward, newFactory, planFactoryEvents } from './packing';
 import type { Ball, GameState, Preferences, Result } from './state';
 
 export type Save = (state: GameState) => void;
@@ -68,6 +69,17 @@ export class Game {
     return this.commit(structuredClone(this.state));
   }
 
+  /** Remplace la progression en une seule écriture ; les préférences restent conservées. */
+  resetProgress(): boolean {
+    if (!this.writable) return false;
+    const next = newGame(); next.preferences = structuredClone(this.state.preferences);
+    this.error = '';
+    if (!this.commit(next)) return false;
+    this.stopAuto(); this.fractionalMs = 0;
+    this.notice = 'Sauvegarde supprimée. Nouvelle partie : 19,00 pièces. Réglages conservés.';
+    return true;
+  }
+
   launch(origin: Ball['origin'] = 'manual'): Ball | undefined {
     if (!this.available()) return;
     const s = this.state;
@@ -80,7 +92,7 @@ export class Game {
     if (s.walletCents < betCents) { this.notice = 'Pas assez de pièces. Un service à l’usine permet de repartir.'; return; }
     const { multiplier, exit } = drawOutcome(this.random);
     const baseCents = origin === 'manual' ? betCents : 100;
-    const bonus = s.bonusRemainingMs > 0 ? 10 : 1;
+    const bonus = s.bonusRemainingMs > 0 ? CONFIG.bonusFactor : 1;
     const ball: Ball = { id: `ball-${s.nextBallSequence}`, sequence: s.nextBallSequence, origin, betCents, baseCents, multiplier, exit, bonus, returnCents: Math.round(baseCents * multiplier / 100) * bonus };
     const next = structuredClone(s);
     next.walletCents -= betCents;
@@ -132,16 +144,35 @@ export class Game {
     return true;
   }
 
+  stopAuto(): void { this.autoEnabled = false; this.autoElapsed = 0; }
+
   startFactory(): boolean {
-    this.autoEnabled = false;
-    this.autoElapsed = 0;
+    this.stopAuto();
     const s = this.state;
     if (!this.available() || s.factoryRemainingMs > 0) return false;
     if (s.pendingBalls.length > 0) { this.notice = 'Automatisation arrêtée. Attendez l’arrivée des billes, puis réessayez.'; return false; }
     const next = structuredClone(s);
     next.factoryRemainingMs = CONFIG.factoryDuration;
+    next.factory = { ...newFactory(), status: 'active', events: planFactoryEvents(this.random) };
     if (!this.commit(next)) return false;
-    this.notice = 'Un petit service. Un salaire garanti. Aucune anomalie déclarée.';
+    this.notice = 'Une minute. Les grises rapportent ; les rouges font tout sauter.';
+    return true;
+  }
+
+  hitFactoryBall(id: number): boolean {
+    const s = this.state;
+    if (!this.available() || s.factoryRemainingMs <= 0 || s.factory.status !== 'active' || s.factory.legacy) return false;
+    const ball = s.factory.balls.find(ball => ball.id === id);
+    if (!ball) return false;
+    const next = structuredClone(s);
+    if (ball.kind === 'red') {
+      next.factory.status = 'exploded'; next.factoryRemainingMs = 0; next.factory.balls = [];
+    } else {
+      next.factory.greyHits++;
+      next.factory.balls = next.factory.balls.filter(ball => ball.id !== id);
+    }
+    if (!this.commit(next)) return false;
+    this.notice = ball.kind === 'red' ? 'Explosion ! Aucun salaire pour ce service.' : 'Bille grise validée : +0,50 pièce en attente.';
     return true;
   }
 
@@ -159,19 +190,22 @@ export class Game {
     return this.commit({ ...structuredClone(this.state), preferences: { ...this.state.preferences, ...preferences } });
   }
 
-  advance(delta: number, active = true): void {
-    if (!active || !this.available() || delta <= 0) return;
+  advance(delta: number, active = true, clock: 'all' | 'factory' = 'all'): void {
+    if (!active || !this.available() || delta <= 0 || (clock === 'factory' && this.state.factoryRemainingMs === 0)) return;
     const precise = delta + this.fractionalMs;
     const ms = Math.floor(precise);
     this.fractionalMs = precise - ms;
     const next = structuredClone(this.state);
-    next.manualCooldownMs = Math.max(0, next.manualCooldownMs - ms);
+    if (clock === 'all') next.manualCooldownMs = Math.max(0, next.manualCooldownMs - ms);
     if (next.factoryRemainingMs > 0) {
+      advanceFactory(next.factory, Math.min(ms, next.factoryRemainingMs), CONFIG.factoryDuration - next.factoryRemainingMs, this.random);
       next.factoryRemainingMs = Math.max(0, next.factoryRemainingMs - ms);
       if (next.factoryRemainingMs === 0) {
-        next.walletCents += CONFIG.factorySalary;
-        next.stats.factoryIncome += CONFIG.factorySalary;
-        if (this.commit(next)) this.notice = 'Service terminé. +15,00 pièces. La machine vous attend.';
+        next.factory.status = 'success'; next.factory.balls = [];
+        const reward = factoryReward(next.factory);
+        next.walletCents += reward;
+        next.stats.factoryIncome += reward;
+        if (this.commit(next)) this.notice = reward ? `Service terminé. +${(reward / 100).toFixed(2).replace('.', ',')} pièces.` : 'Service terminé. Aucune bille grise : aucun salaire.';
         return;
       }
     } else next.bonusRemainingMs = Math.max(0, next.bonusRemainingMs - ms);
@@ -179,7 +213,7 @@ export class Game {
     if (this.checkpointElapsed >= 1000 || (this.state.bonusRemainingMs > 0 && next.bonusRemainingMs === 0)) {
       if (!this.commit(next)) return;
     } else this.state = next;
-    if (this.autoEnabled && !isBroken(this.state) && this.state.factoryRemainingMs === 0) {
+    if (clock === 'all' && this.autoEnabled && !isBroken(this.state) && this.state.factoryRemainingMs === 0) {
       this.autoElapsed += ms;
       if (this.autoElapsed >= CONFIG.autoInterval) { this.autoElapsed = 0; this.launch('auto'); }
     }

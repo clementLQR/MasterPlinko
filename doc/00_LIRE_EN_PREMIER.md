@@ -49,8 +49,10 @@ Le créateur essaie le jeu, évalue le rendu et le rythme, puis formule ses reto
 Le jeu se lance en localhost avec les commandes du [README](../README.md). L’essai de 10 à 15 minutes par le créateur reste à faire.
 
 ## Navigation validée
-Positions de caméra fixes dans la pièce, sans marche libre. Plinko et établi, escalier cliquable pour les destinations extérieures, transitions courtes et retour direct. La production continue pendant les achats, la navigation et le menu des destinations. Cave en pierre lofi numérique et machine crème/pastel selon les références du créateur. Règles détaillées dans les fichiers 04 et 11.
+Positions de caméra fixes dans la pièce, sans marche libre. Plinko et établi, escalier cliquable pour les destinations extérieures, transitions courtes et retour direct. La production continue pendant achats et cadrages ordinaires. La sortie anime approche et montée, puis destinations sur noir complet ; trajet, choix et descente suspendent le jeu. Pendant le travail, seule la durée du service avance dans un onglet visible. Cave en pierre lofi numérique et machine crème/pastel selon les références du créateur. Règles détaillées dans les fichiers 04 et 11.
 
 
 ## Gestion des documents
+La boutique publique d’Azur est une visite distincte, accessible depuis les destinations après sa rencontre à la première panne. Après la réparation initiale achetée, la porte privée mène à une réserve, puis un passage dissimulé par une étagère et commandé par une radio révèle l’atelier du Plinko cassé et de ses prototypes. Aucun HUD, acquisition ou nouveau système économique ; horloges suspendues pendant toute la visite. Périmètre et interactions au fichier 11.
+
 Modifier directement les fichiers de référence. Ne pas créer de copies datées, de fichiers de backup ou de variantes numérotées. Git/GitHub conserve l’historique des modifications. Les fonctionnalités restent distinguées entre travail immédiat et ajouts futurs.

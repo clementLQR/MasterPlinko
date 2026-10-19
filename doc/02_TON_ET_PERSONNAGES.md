@@ -39,6 +39,7 @@ Ingénieur compétent mais beaucoup trop optimiste. Il sous-estime les conséque
 - Signature : « Normalement, oui. »
 - « J'ai sécurisé le bouton. Il faut maintenant appuyer deux fois pour prendre feu. »
 - Sa confiance ne doit pas en faire quelqu'un d'indifférent au danger des autres.
+- Sa boutique publique vend et répare des appareils électroniques ordinaires reconditionnés. Bois chaleureux, appareils pastel, réparations et composants visibles ; quelques détails étranges comme une radio à cinq antennes et l’étiquette « Fonctionne normalement ». Aucun Plinko ni prototype d’amélioration dans l’espace public. Après la réparation initiale achetée, sa porte privée mène à une réserve banale : une radio déverrouille une étagère coulissante dissimulant le couloir de l’atelier. Là se trouvent son MasterPlinko cassé et des prototypes ambitieux, ouverts ou inachevés, sans acquisition automatique. Notes contradictoires et réparations improvisées prolongent son humour discret.
 
 ## Marceau
 **Rôle :** analyse des résidus et consommables.

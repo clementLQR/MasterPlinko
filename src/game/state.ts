@@ -1,5 +1,7 @@
 import { CONFIG } from '../config';
 import type { UpgradeId } from '../config';
+import { newFactory } from './packing';
+import type { FactoryState } from './packing';
 
 export interface Ball {
   id: string;
@@ -9,7 +11,8 @@ export interface Ball {
   baseCents: number;
   multiplier: number;
   exit: number;
-  bonus: 1 | 10;
+  /** 10 reste accepté pour les retours déjà figés dans les anciennes sauvegardes. */
+  bonus: 1 | 2 | 10;
   returnCents: number;
 }
 
@@ -26,7 +29,7 @@ export interface Stats {
 }
 export interface Preferences { sound: boolean; reducedMotion: boolean; quality: 'normal' | 'low' }
 export interface GameState {
-  saveVersion: 1;
+  saveVersion: 3;
   profile: 'prototype';
   walletCents: number;
   selectedBetCents: number;
@@ -40,6 +43,7 @@ export interface GameState {
   chargeReady: boolean;
   bonusRemainingMs: number;
   factoryRemainingMs: number;
+  factory: FactoryState;
   manualCooldownMs: number;
   history: Result[];
   preferences: Preferences;
@@ -48,11 +52,11 @@ export interface GameState {
 
 export function newGame(): GameState {
   return {
-    saveVersion: 1, profile: 'prototype', walletCents: CONFIG.initialWallet,
+    saveVersion: 3, profile: 'prototype', walletCents: CONFIG.initialWallet,
     selectedBetCents: CONFIG.minBet, nextBallSequence: 1, pendingBalls: [], upgrades: [],
     repairTriggered: false, repairPurchased: false,
     stats: { launched: 0, settled: 0, paidBets: 0, grossReturns: 0, paidProfit: 0, freeProduction: 0, factoryIncome: 0, upgradeExpenses: 0 },
-    heatCount: 0, chargeReady: false, bonusRemainingMs: 0, factoryRemainingMs: 0, manualCooldownMs: 0,
+    heatCount: 0, chargeReady: false, bonusRemainingMs: 0, factoryRemainingMs: 0, factory: newFactory(), manualCooldownMs: 0,
     history: [], preferences: { sound: false, reducedMotion: false, quality: 'normal' }, savedAt: new Date().toISOString(),
   };
 }

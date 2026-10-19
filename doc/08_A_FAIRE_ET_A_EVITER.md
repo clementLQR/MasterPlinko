@@ -4,7 +4,7 @@
 ### À faire
 - Valider le plaisir du Plinko avant de produire toute l'histoire.
 - Montrer ce qu'un achat change.
-- Conserver un moyen garanti de repartir sans argent.
+- Conserver un travail accessible sans argent ; le tri exige de cliquer les grises et d’éviter les rouges, selon la décision du créateur. Le salaire n’est plus garanti.
 - Donner un rôle distinct à Azur, Marceau et Matéo.
 - Mesurer cadence, variance et rendement moyen.
 - Prévoir un intérêt aux stratégies régulières.
@@ -37,13 +37,16 @@
 
 ## Interface
 ### À faire
-- Intégrer les actions au décor tout en gardant des repères.
+- Dans la cave, intégrer commandes et informations aux objets 3D ; plein écran sans HUD, cadre ni défilement. Seule exception autorisée hors cave : destinations sur fond entièrement noir après la sortie ; poste 3D dans sa salle d’usine d’origine avec fiche physique pendant le travail.
+- Afficher les explications uniquement au survol ou au focus clavier, près de l’objet ; rapprocher la caméra pour lire ses surfaces.
 - Rendre le solde, la mise et le résultat toujours accessibles.
 - Indiquer clairement effets temporaires, coûts et conditions.
 - Prévoir des raccourcis et la possibilité de passer les dialogues.
+- Alléger le boîtier : récupération uniquement en erreur, aucune commande Relire permanente. Confirmer sur le support toute suppression de progression, avec annulation prioritaire et export possible.
 
 ### À éviter
 - Cacher un bouton indispensable dans un objet illisible.
+- Réintroduire dans la cave bandeau, colonne, commandes HTML, légende ou notification flottante, même transparente.
 - Dépendre uniquement d'une couleur ou d'un son.
 - Faire expirer un consommable pendant une scène imposée.
 - Multiplier les déplacements de caméra pour des actions répétitives.
