@@ -392,3 +392,46 @@ Vérifications exécutées :
 - Aperçu réel de production sur 4173 : plan seul avec réserve héritée à dix reste inactif, aucune bille gratuite ni module visible ; après montage, modules visibles, récompense du Collecteur et attraction du Doigt actives sans variables DEV. Réglage puis double rechargement : retours figés payés une seule fois, aucun nouveau lancement automatique. **Aucune erreur JavaScript** relevée dans ce contrôle.
 - Captures inspectées à **1280×720, qualité légère** : `test-results/azur-plan-aimants.png`, `azur-plan-collecteur.png`, `plinko-montage-aimants-collecteur.png`, `aimants-attraction.png`, `modules-production-installes.png`. Prix lisibles et nouvelle commande des Aimants dégagée. Capture complémentaire : `modules-production-plans.png`.
 - Limites : les prix sont confirmés mais le rythme des nouvelles acquisitions reste à évaluer lors de la session utilisateur de dix à quinze minutes ; pas de nouvelle mesure de fluidité. Serveurs d’essai et aperçu arrêtés après vérification, serveur préexistant 5173 conservé. Aucun commit ni push.
+
+## Retours de session du créateur — 19 et 20 octobre 2026 (MP-048)
+- [x] Revue complète du code : TypeScript, tests et build passaient ; corrections mineures (code mort dans l’achat, virgule décimale du compteur et du carnet, hasard de l’usine validé, cadence exacte du Doigt, remise à zéro après import).
+- [x] Trappe de montage supprimée à la demande du créateur : l’achat chez Azur débite une fois et installe dans la même transaction ; la réparation ouvre l’atelier privé pendant la même visite. Format 6 conservé ; un plan payé non monté d’une ancienne sauvegarde est installé au chargement, sans nouveau débit.
+- [x] Escalier accessible même avec le Doigt en marche : arrêt du Doigt au départ, aucune nouvelle bille, billes en vol finies pendant la montée puis réglées une seule fois à l’arrivée (`settleAll`, retour figé, aucun hasard).
+- [x] Atelier d’Azur : plaque « MAISON » et Échap depuis la vue principale ramènent directement à la cave ; plaque « BOUTIQUE » conservée.
+- [x] Gel boutique→atelier : cause mesurée au profileur Chrome (compilation de shaders pendant le trajet, 7 s dans `getProgramInfoLog`). Préparation des quatre configurations de lumière vers la bonne cible de rendu, relancée à l’arrivée des textures, étiquette de survol texturée dès sa création, pas d’animation plafonné à 50 ms.
+- [x] Décor : poutres transversales d’un mur à l’autre, coupées autour de la cage d’escalier ; guirlande et conduit électrique démarrant hors de la cage. Contrôle automatique : plus aucun objet du décor dans le volume de la cage.
+
+Vérifications exécutées :
+- `npm run typecheck` et `npm run build` réussis (avertissement de taille du paquet principal préexistant).
+- `npm test` : **80 tests réussis**, dont la réécriture des scénarios d’achat (installation immédiate, refus avec billes en vol, échec d’écriture, migration des plans payés des formats 5 et 6) et un nouveau scénario de règlement au départ par l’escalier.
+- `$env:PLINKO_GPU='1'; npx playwright test` : dernier passage complet **26 réussites, 2 ignorés (prévus), 2 échecs intermittents**. « départ avec une bille en vol » a échoué au chargement initial de la page (avant toute logique modifiée), puis a réussi **3 fois sur 3** seul ; « atelier caché » a réussi **2 fois sur 2** seul. Les trois parcours de la boutique 3D réussissent après correction de l’emplacement du plafond de pas.
+- Mesure Chrome du trajet boutique→atelier (GPU réel, même poste, trois passages, comparaison à la version précédente) : gel de **5,9 à 6,6 s** pendant le trajet avant correction ; pire à-coup **0,3 à 1,5 s** après. Entrée dans la boutique inchangée (environ 4,5 à 5,5 s), suivie d’un à-coup d’environ 2 s pendant la préparation de l’atelier.
+- Capture de montée de l’escalier inspectée : plus aucun élément ne traverse la cage. Poutre et escalier confirmés par le créateur.
+- Limites : coût restant dû au pilote graphique au premier dessin des shaders, non supprimable côté JavaScript ; à confirmer sur la machine du créateur. Rythme et ressenti de l’achat direct à évaluer en jeu. Aucun commit, push ou déploiement.
+
+## Performance — première passe (MP-031), 20 octobre 2026
+- [x] Mesure du parcours réel (démarrage, cave, lancements, vues, survol, escalier, usine) et profil CPU du démarrage : 8,5 s de compilation synchrone des shaders au premier rendu (quinze lumières ponctuelles déroulées dans chaque shader, 39 programmes).
+- [x] Cave : aucune image avant `scene.prepare()` ; compilation asynchrone vers la bonne cible, textures envoyées au GPU, page réactive. Matériaux des quatre types de billes et étiquette de survol inclus dans la compilation.
+- [x] Contexte audio créé seulement si le son est activé.
+- [x] three.js dans un fichier séparé : plus d’avertissement de taille au build.
+- [x] Tests navigateur : attente réelle de la partie chargée et de la première image après rechargement (la course était auparavant masquée par le gel du démarrage).
+
+Vérifications exécutées :
+- `npm run typecheck`, `npm run build` (sans avertissement : application 158,6 ko, three.js 635,1 ko, boutique 86,1 ko) et `npm test` (**80 réussis**).
+- `$env:PLINKO_GPU='1'; npx playwright test` : dernier passage complet **27 réussis, 2 ignorés (prévus), 1 échec** (« rouge dans le jeu », course de test au rechargement) ; après correction du test, **3 réussites sur 3** en isolé.
+- Build de production servi par `vite preview` : parcours « escalier » et « achats chez Azur » réussis.
+- Mesures Chrome (GPU réel, trois passages) : partie prête en **3,5 à 3,9 s** (avant : 12 à 15 s) ; premier survol sous 0,35 s (avant : 1,5 à 1,7 s) ; lancements sous 0,1 s hors pause isolée ; escalier et usine généralement sous 0,4 s.
+- Limites : un à-coup de 2 à 3 s au premier dessin, avant toute image visible ; pauses isolées de 1 à 3 s à des moments variables, présentes aussi avant les changements et attribuées au pilote ; usine non préchauffée. Fluidité à confirmer par le créateur. Aucun commit, push ou déploiement.
+
+## Rendu industriel de l’usine (MP-049), 20 octobre 2026
+- [x] Nouveau module `src/rendering/factoryHall.ts` : salle et convoyeur procéduraux, matériaux et géométries partagés, textures canvas (béton, parpaings, bardage, bande, bandes de sécurité).
+- [x] Convoyeur : bande à tasseaux animée par décalage de texture selon l’horloge du tapis (fixe en mouvement réduit), longerons, bande jaune et noire côté opérateur, rouleaux de retour, tambours, pieds et contreventements, moteur, arrêt d’urgence, support à rouleaux du carton.
+- [x] Alimentation : caisson, rideau de lanières, trémie remplie de billes, conduite, colonne lumineuse dont le voyant du haut reste celui des événements.
+- [x] Salle : sol béton et allées jaunes, zone hachurée, parpaings, bardage ondulé, verrières, poteaux et poutre en I, tuyauteries avec vanne et manomètre, chemin de câbles, suspensions et réglette, rayonnages à palettes, fûts, extincteur, panneaux, porte sectionnelle, armoire électrique ; ombres portées et rais de lumière non interactifs.
+- [x] Fiches du service sur tableaux à montants d’acier ; plaque « L’USINE DU COIN » en jaune sécurité. Aucun objet n’entre dans la ligne de visée des billes.
+
+Vérifications exécutées :
+- `npm run typecheck`, `npm run build` (sans avertissement) et `npm test` (**80 réussis**).
+- `$env:PLINKO_GPU='1'; npx playwright test` : **28 réussis, 2 ignorés (prévus), aucun échec**. Le contrôle « bande fixe en mouvement réduit » vérifie désormais le décalage de la texture de bande.
+- Captures inspectées : `test-results/usine-tri.png`, `usine-arrivage.png`, `usine-explosion.png` (1440×1000 et 1280×720) ; fiches lisibles, billes et marques visibles, explosion lisible.
+- Limites : appréciation artistique à confirmer par le créateur. Aucun commit, push ou déploiement.

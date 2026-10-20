@@ -2,7 +2,8 @@
 export class Sound {
   private context?: AudioContext;
   private lastContact = -Infinity;
-  unlock() { this.context ??= new AudioContext(); void this.context.resume(); }
+  /** Créer le contexte audio seulement si le son est activé : sa création peut prendre près d’une seconde. */
+  unlock(enabled: boolean) { if (!enabled) return; this.context ??= new AudioContext(); void this.context.resume(); }
   contact(variant: number, enabled: boolean) {
     if (!enabled || !this.context || this.context.state !== 'running') return;
     const now = this.context.currentTime;

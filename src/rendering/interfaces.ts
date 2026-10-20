@@ -1,15 +1,13 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { CONFIG, UPGRADES } from '../config';
-import type { UpgradeId } from '../config';
+import { CONFIG } from '../config';
 import { isBroken } from '../game/state';
-import { installationIssue } from '../game/plans';
 import type { GameState } from '../game/state';
 import type { View } from '../navigation/camera';
 
 export type InterfaceState = {
   canWrite: boolean; canManageSave?: boolean; recovery?: boolean; confirmDelete?: boolean; importing?: boolean; autoEnabled: boolean; message: string;
-  historyPage: number; installationPage?: number; importWallet?: number; magnetsAvailable?: boolean; collectorAvailable?: boolean;
+  historyPage: number; importWallet?: number; magnetsAvailable?: boolean; collectorAvailable?: boolean;
 };
 export type Register = (object: THREE.Object3D, action: string, label: () => string, views?: View[]) => void;
 const money = (n: number) => (n / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -68,7 +66,6 @@ export class DiegeticInterface {
   private result: Page;
   private status: Page;
   private heat: Page;
-  private installation: Page;
   private settings: Page;
   private ticket: Page;
   private ticketRoot = new THREE.Group();
@@ -101,19 +98,6 @@ export class DiegeticInterface {
     this.autoLed = box(auto, 0.14, 0.14, 0.12, 0.43, -0.47, 0.86, '#567253');
     register(this.autoSwitch, 'auto', () => !this.available() || (this.state && isBroken(this.state)) ? 'Doigt mécanique indisponible — consulter l’état de la machine' : this.ui.autoEnabled ? 'Arrêter le Doigt mécanique' : 'Activer le Doigt mécanique — bille gratuite toutes les 2 s', ['plinko', 'commandes']);
 
-    const mounting = new THREE.Group(); mounting.name = 'machine:montage'; mounting.position.set(-6.65, -4.65, 0.85); machine.add(mounting);
-    box(mounting, 2.7, 4.25, 0.42, 0, 0, 0, '#bec0a5');
-    for (const y of [-1.8, 1.8]) {
-      box(mounting, 0.55, 0.15, 0.18, 1.52, y, -0.22, '#8c7758');
-      box(mounting, 0.13, 0.28, 0.10, -1.18, y, 0.26, '#8c7758');
-    }
-    this.installation = new Page(mounting, 2.42, 3.95, 0, 0, 0.23, register);
-    register(this.installation.mesh, 'montage', () => 'Trappe de montage — installer les plans achetés chez Azur', ['plinko', 'commandes']);
-    for (const [i, id] of (Object.keys(UPGRADES) as UpgradeId[]).entries()) this.installation.zone(`install:${id}`, () => `${UPGRADES[id].name} — ${this.installCondition(id)}`, 45, 230 + i % 3 * 330, 910, 290, ['montage']);
-    this.installation.zone('montage-prev', () => 'Plans précédents à installer', 45, 1330, 400, 80, ['montage']);
-    this.installation.zone('montage-next', () => 'Autres plans à installer', 555, 1330, 400, 80, ['montage']);
-    this.installation.zone('plinko', () => 'Fermer la trappe de montage', 45, 1450, 910, 110, ['montage']);
-
     const device = new THREE.Group(); device.name = 'support:reglages'; device.position.set(-7.15, 0, 1.3); scene.add(device);
     box(device, 2.95, 4.5, 0.55, 0, 0, -0.28, '#8d9c8a');
     this.settings = new Page(device, 2.7, 4.2, 0, 0, 0.015, register);
@@ -144,10 +128,6 @@ export class DiegeticInterface {
     this.ticket.zone('plinko', () => 'Ranger le ticket — revenir à la machine', 35, 1530, 920, 38, ['historique']);
   }
   private available() { return this.ui.canWrite && !this.state?.factoryRemainingMs; }
-  private installCondition(id: UpgradeId) {
-    if (!this.state) return 'Plan requis';
-    return !this.ui.canWrite ? 'Partie suspendue' : installationIssue(this.state, id) ?? 'Installer le plan — déjà payé';
-  }
   update(s: GameState, ui: InterfaceState, view: View) {
     this.state = s; this.ui = ui;
     this.ticketRoot.visible = view === 'historique' && s.upgrades.includes('azur.accounting_tray');
@@ -162,24 +142,6 @@ export class DiegeticInterface {
     const dischargeMat = this.discharge.material as THREE.MeshStandardMaterial; dischargeMat.emissive.set(s.chargeReady ? '#ffc477' : '#000000'); dischargeMat.emissiveIntensity = s.chargeReady ? 0.8 : 0;
     this.autoSwitch.rotation.x = ui.autoEnabled ? -0.3 : 0.3;
     const autoMat = this.autoLed.material as THREE.MeshStandardMaterial; autoMat.color.set(ui.autoEnabled ? '#c9ebaf' : '#56634f'); autoMat.emissive.set(ui.autoEnabled ? '#8eb86b' : '#000000'); autoMat.emissiveIntensity = ui.autoEnabled ? 1 : 0;
-    const installationPage = ui.installationPage ?? 0, ids = Object.keys(UPGRADES) as UpgradeId[];
-    this.installation.draw(JSON.stringify([s.plans, s.upgrades, s.pendingBalls.length, this.available(), installationPage]), paper, c => {
-      text(c, 'TRAPPE DE MONTAGE', 45, 40, 64);
-      text(c, 'Plans achetés chez Azur', 45, 135, 37, muted);
-      text(c, `Planche ${installationPage + 1}/${Math.ceil(ids.length / 3)}`, 45, 186, 28, muted);
-      ids.slice(installationPage * 3, installationPage * 3 + 3).forEach((id, i) => {
-        const y = 230 + i * 330;
-        c.fillStyle = s.plans.includes(id) ? '#c8d0ac' : '#d5cdb5'; c.fillRect(45, y, 910, 290);
-        text(c, UPGRADES[id].name, 75, y + 35, 48, ink, 850);
-        wrap(c, this.installCondition(id), 75, y + 110, 840, 37);
-      });
-      wrap(c, 'Le montage utilise le plan. Aucun nouveau paiement.', 55, 1215, 880, 35, muted);
-      for (const [action, label, x] of [['montage-prev', '← Plans', 45], ['montage-next', 'Plans →', 555]] as const) {
-        c.fillStyle = this.actionAvailable(action) ? '#c8d0ac' : '#d5cdb5'; c.fillRect(x, 1330, 400, 80);
-        text(c, label, x + 30, 1350, 35);
-      }
-      row(c, 'Fermer / retour machine', 1450, true, 110);
-    });
     const prefs = s.preferences;
     this.settings.draw(JSON.stringify([prefs, ui.message, ui.importWallet, ui.canWrite, ui.canManageSave, ui.recovery, ui.confirmDelete, ui.importing, view === 'reglages']), '#243d35', c => {
       text(c, 'BOÎTIER DE PAPY', 45, 35, 60, '#d8e6b6');
@@ -227,10 +189,6 @@ export class DiegeticInterface {
     if (['sound', 'motion', 'quality'].includes(action)) return this.ui.canWrite;
     if (['export', 'import', 'delete-save'].includes(action)) return this.ui.canManageSave ?? this.ui.canWrite;
     if (action === 'retry') return !!this.ui.recovery && (this.ui.canManageSave ?? this.ui.canWrite);
-    const page = this.ui.installationPage ?? 0;
-    if (action === 'montage-prev') return page > 0;
-    if (action === 'montage-next') return page < Math.ceil(Object.keys(UPGRADES).length / 3) - 1;
-    if (action.startsWith('install:')) return Math.floor(Object.keys(UPGRADES).indexOf(action.slice(8)) / 3) === page;
     return true;
   }
 }

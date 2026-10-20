@@ -83,7 +83,9 @@ export class PlinkoScene {
   private ui: InterfaceState = { canWrite: false, autoEnabled: false, message: '', historyPage: 0 };
   private currentState?: GameState;
   private focused?: THREE.Object3D;
-  private hint = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: true, depthWrite: false }));
+  private hint = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.Texture(), transparent: true, depthTest: true, depthWrite: false }));
+  /** `none` : rendu immédiat (fixtures) ; `waiting`/`compiling` : aucune image avant shaders prêts. */
+  private gate: 'none' | 'waiting' | 'compiling' | 'ready' = 'none';
   private highlight = new THREE.Box3Helper(new THREE.Box3(), '#e0d3a0');
   private hintText = '';
   private geometries = new Map<string, THREE.BufferGeometry>();
@@ -102,7 +104,8 @@ export class PlinkoScene {
   private iron = new THREE.MeshStandardMaterial({ color: '#35413b', metalness: 0.64, roughness: 0.48 });
   private brass = new THREE.MeshStandardMaterial({ color: '#b99b69', metalness: 0.7, roughness: 0.38 });
 
-  constructor(private element: HTMLElement, private navigation: Navigation, onAction: (action: Action) => void, private onContact: (variant: number) => void = () => {}) {
+  constructor(private element: HTMLElement, private navigation: Navigation, onAction: (action: Action) => void, private onContact: (variant: number) => void = () => {}, deferRender = false) {
+    if (deferRender) this.gate = 'waiting';
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); this.renderer.setClearColor('#211c1b');
     this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -157,6 +160,9 @@ export class PlinkoScene {
     this.hint.visible = false; this.highlight.visible = false;
     (this.highlight.material as THREE.LineBasicMaterial).transparent = true; (this.highlight.material as THREE.LineBasicMaterial).opacity = 0.38;
     this.scene.add(this.hint, this.highlight);
+    for (const material of [this.silver, this.autoMaterial, this.bonusMaterial, this.collectorMaterial]) {
+      const ball = new THREE.Mesh(this.ballGeometry, material); ball.visible = false; this.machine.add(ball);
+    }
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     const ao = new SSAOPass(this.scene, this.camera, 640, 360, 12); ao.kernelRadius = 0.8; ao.minDistance = 0.0008; ao.maxDistance = 0.026;
@@ -382,11 +388,14 @@ export class PlinkoScene {
       const start = opening ? 4.6 : -3.2;
       this.box(this.scene, 1.5, 0.2, roomEnd - start, x, 9.45, (roomEnd + start) / 2, this.darkWood);
     }
+    // Poutres d’un mur à l’autre (x = -24,75 → 18,5) ; au-dessus de la cage d’escalier,
+    // elles s’arrêtent contre le coffrage (x = -21,71 et -16,29) sans traverser le puits.
+    const wallLeft = -24.75, wallRight = 18.5, shaftLeft = STAIRS.x - 2.71, shaftRight = STAIRS.x + 2.71;
     for (const z of [-1.5, 4.5, 10.5, 16.5, 22.5, 28.5, 34.5, 40.5, 46.5]) {
-      if (z === -1.5) {
-        this.box(this.scene, 3.2, 0.65, 0.6, -23.4, 9, z, this.darkWood);
-        this.box(this.scene, 35.2, 0.65, 0.6, 1.4, 9, z, this.darkWood);
-      } else this.box(this.scene, 37, 0.65, 0.6, 0, 9.0, z, this.darkWood, 0.16);
+      if (z < 6) {
+        this.box(this.scene, shaftLeft - wallLeft, 0.65, 0.6, (wallLeft + shaftLeft) / 2, 9, z, this.darkWood);
+        this.box(this.scene, wallRight - shaftRight, 0.65, 0.6, (shaftRight + wallRight) / 2, 9, z, this.darkWood);
+      } else this.box(this.scene, wallRight - wallLeft, 0.65, 0.6, (wallLeft + wallRight) / 2, 9.0, z, this.darkWood, 0.16);
     }
     for (const x of [-14, -5.5, 7, 17]) this.box(this.scene, 0.7, 0.85, roomEnd + 3.75, x, 8.8, (roomEnd - 3.75) / 2, this.darkWood, 0.16);
     this.buildWindow(); this.buildPendant();
@@ -530,14 +539,14 @@ export class PlinkoScene {
   }
   private exitLabel() {
     const balls = this.currentState?.pendingBalls.length ?? 0;
-    return balls ? `Sortir de la cave — attendre l’arrivée des ${balls} bille(s)${this.ui.autoEnabled ? ' ; arrêter le Doigt mécanique' : ''}` : 'Sortir de la cave';
+    return `Sortir de la cave${this.ui.autoEnabled ? ' — le Doigt mécanique s’arrêtera' : ''}${balls ? ` · ${balls} bille(s) finiront leur chute` : ''}`;
   }
   private launchCondition() {
     const s = this.currentState;
     if (!this.ui.canWrite) return ' · partie suspendue';
     if (!s) return '';
     if (s.factoryRemainingMs) return ' · service en cours';
-    if (s.repairTriggered && !s.repairPurchased) return s.plans.includes('azur.initial_repair') ? ' · panne, installer le plan sur la trappe de montage' : ' · panne, acheter le plan chez Azur';
+    if (s.repairTriggered && !s.repairPurchased) return ' · panne, faire réparer chez Azur';
     if (s.walletCents < s.selectedBetCents) return ' · solde insuffisant, usine accessible par l’escalier';
     if (s.pendingBalls.length >= CONFIG.maxBalls) return ' · 50 billes en cours';
     if (s.manualCooldownMs) return ' · patienter';
@@ -621,7 +630,33 @@ export class PlinkoScene {
   private resize() {
     const { width, height } = this.element.getBoundingClientRect(); this.renderer.setSize(Math.max(1, width), Math.max(1, height)); this.camera.aspect = width / Math.max(1, height); this.updateCamera(); this.camera.updateProjectionMatrix(); this.composer?.setSize(Math.max(1, width), Math.max(1, height)); this.render();
   }
+  private applyQuality(quality: string) {
+    this.quality = quality; this.renderer.setPixelRatio(this.quality === 'low' ? 1 : Math.min(devicePixelRatio, 1.5)); this.renderer.shadowMap.enabled = this.quality !== 'low'; this.renderer.shadowMap.needsUpdate = true; this.composer.setPixelRatio(this.renderer.getPixelRatio()); this.resize();
+  }
+  /**
+   * Démarrage sans image figée : avec ses nombreuses lumières, la cave compte une quarantaine de shaders
+   * coûteux. Les compiler en parallèle dans le pilote (`compileAsync`), vers la cible réellement
+   * utilisée, avant la première image ; la page reste réactive pendant ce temps.
+   */
+  prepare(quality: string) {
+    if (this.gate === 'compiling' || this.gate === 'ready') return;
+    this.gate = 'compiling'; this.applyQuality(quality);
+    this.renderer.setRenderTarget(this.quality !== 'low' ? this.composer.readBuffer : null);
+    const ready = this.renderer.compileAsync(this.scene, this.camera);
+    this.renderer.setRenderTarget(null);
+    void ready.then(() => {
+      // Envoyer aussi les textures au GPU (pages du boîtier, ticket, étiquettes) avant la première image.
+      this.scene.traverse(object => {
+        const material = (object as THREE.Mesh).material;
+        for (const m of Array.isArray(material) ? material : material ? [material] : []) {
+          for (const value of Object.values(m)) if (value instanceof THREE.Texture) this.renderer.initTexture(value);
+        }
+      });
+      this.gate = 'ready';
+    });
+  }
   private render() {
+    if (this.gate === 'waiting' || this.gate === 'compiling') return;
     if (this.composer && this.quality !== 'low') this.composer.render();
     else this.renderer.render(this.scene, this.camera);
   }
@@ -645,9 +680,9 @@ export class PlinkoScene {
     this.element.dataset.modules = MODULE_SLOTS.filter(slot => this.modules.get(slot.id)!.visible).map(slot => slot.id).join(',');
     if (this.wallet !== state.walletCents) {
       this.wallet = state.walletCents; const canvas = this.counter.image as HTMLCanvasElement, ctx = canvas.getContext('2d')!;
-      ctx.fillStyle = '#201d18'; ctx.fillRect(0, 0, 256, 80); ctx.fillStyle = '#ffd082'; ctx.shadowColor = '#e69930'; ctx.shadowBlur = 4; ctx.font = '48px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText((state.walletCents / 100).toFixed(2).padStart(6, '0'), 128, 43, 236); this.counter.needsUpdate = true;
+      ctx.fillStyle = '#201d18'; ctx.fillRect(0, 0, 256, 80); ctx.fillStyle = '#ffd082'; ctx.shadowColor = '#e69930'; ctx.shadowBlur = 4; ctx.font = '48px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText((state.walletCents / 100).toFixed(2).padStart(6, '0').replace('.', ','), 128, 43, 236); this.counter.needsUpdate = true;
     }
-    if (this.quality !== state.preferences.quality) { this.quality = state.preferences.quality; this.renderer.setPixelRatio(this.quality === 'low' ? 1 : Math.min(devicePixelRatio, 1.5)); this.renderer.shadowMap.enabled = this.quality !== 'low'; this.renderer.shadowMap.needsUpdate = true; this.composer.setPixelRatio(this.renderer.getPixelRatio()); this.resize(); }
+    if (this.quality !== state.preferences.quality) this.applyQuality(state.preferences.quality);
     const ids = new Set(state.pendingBalls.map(ball => ball.id));
     for (const [id, flight] of this.flights) if (!ids.has(id)) { this.machine.remove(flight.mesh); this.flights.delete(id); }
     for (const ball of state.pendingBalls) if (!this.flights.has(ball.id)) this.addBall(ball);
@@ -675,7 +710,7 @@ export class PlinkoScene {
     const indicator = this.indicator.material as THREE.MeshStandardMaterial; indicator.color.set(state.repairTriggered && !state.repairPurchased ? '#d8907d' : state.bonusRemainingMs > 0 ? '#f1c37b' : '#abd2ab');
     this.interfaces.update(state, this.ui, this.navigation.target);
     if (this.focused) this.focus(this.reachable(this.focused) ? this.focused : undefined);
-    this.render(); this.element.dataset.renderedView = this.navigation.moving ? 'moving' : this.navigation.target;
+    this.render(); if (this.gate === 'none' || this.gate === 'ready') this.element.dataset.renderedView = this.navigation.moving ? 'moving' : this.navigation.target;
   }
   private addBall(ball: Ball) {
     const mesh = new THREE.Mesh(this.ballGeometry, ball.bonus > 1 ? this.bonusMaterial : ball.origin === 'collector' ? this.collectorMaterial : ball.origin === 'auto' ? this.autoMaterial : this.silver); this.machine.add(mesh); this.flights.set(ball.id, { mesh, points: pathToExit(ball.exit, Math.random, ball.magnetFrom), elapsed: 0 });

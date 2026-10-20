@@ -1,4 +1,5 @@
 import { CONFIG, FACTORY_EVENTS } from '../config';
+import { randomUnit } from './outcomes';
 import type { Random } from './outcomes';
 
 export type FactoryEventKind = keyof typeof FACTORY_EVENTS;
@@ -25,9 +26,9 @@ export function factoryReward(factory: FactoryState): number {
 export function planFactoryEvents(random: Random): FactoryEvent[] {
   const kinds: FactoryEventKind[] = ['overdrive', 'delivery', 'slowdown'];
   for (let i = kinds.length - 1; i > 0; i--) {
-    const j = Math.floor(random() * (i + 1)); [kinds[i], kinds[j]] = [kinds[j], kinds[i]];
+    const j = Math.floor(randomUnit(random) * (i + 1)); [kinds[i], kinds[j]] = [kinds[j], kinds[i]];
   }
-  return kinds.map((kind, index) => ({ kind, startsAtMs: 12000 + index * 16000 + Math.floor(random() * 4001) - 2000 }));
+  return kinds.map((kind, index) => ({ kind, startsAtMs: 12000 + index * 16000 + Math.floor(randomUnit(random) * 4001) - 2000 }));
 }
 
 export function factoryEventAt(factory: FactoryState, elapsed: number) {
@@ -72,8 +73,8 @@ export function advanceFactory(factory: FactoryState, ms: number, elapsed: numbe
   const produced = factoryClock(factory.events, end, 'supply');
   while ((factory.nextId - 1) * CONFIG.factorySpawnInterval <= produced) {
     const id = factory.nextId++, born = factorySpawnTime(factory.events, id);
-    const kind = random() < CONFIG.factoryRedChance ? 'red' : 'grey';
-    const preferredLane = Math.min(3, Math.floor(random() * 4));
+    const kind = randomUnit(random) < CONFIG.factoryRedChance ? 'red' : 'grey';
+    const preferredLane = Math.floor(randomUnit(random) * 4);
     const ageMs = belt - factoryClock(factory.events, born, 'belt');
     // En arrivage massif, répartir les nouvelles billes pour qu’elles ne se traversent pas.
     const lane = [0, 1, 2, 3].map(offset => (preferredLane + offset) % 4).find(lane =>

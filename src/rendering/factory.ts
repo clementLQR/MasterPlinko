@@ -5,6 +5,7 @@ import type { GameState } from '../game/state';
 import type { FactoryBall } from '../game/packing';
 import { factoryClock, factoryEventAt, factoryReward } from '../game/packing';
 import { Page } from './interfaces';
+import { FactoryHall, HALL } from './factoryHall';
 
 const TABLE = -1.4;
 const BOX = { x: 5.3, z: 1.1, width: 2.9, depth: 3.1 };
@@ -35,56 +36,26 @@ export class FactoryWork {
   private enabled = false;
   private state?: GameState;
   private observer: ResizeObserver;
-  private beltMarks: THREE.Mesh[] = [];
+  private hall: FactoryHall;
   private eventLamp = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 10), new THREE.MeshStandardMaterial({ color: '#91ad96', emissive: '#49684f', emissiveIntensity: 0.4 }));
   private lastEvent = '';
   get explosionFinished() { return this.explosionMs >= 1100; }
   constructor(private element: HTMLElement, private announce: (text: string) => void, private hitBall: (id: number) => boolean) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'low-power' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.15;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.1;
+    this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     const canvas = this.renderer.domElement;
     canvas.tabIndex = 0; canvas.setAttribute('role', 'application');
     canvas.setAttribute('aria-label', 'Usine : cliquer les billes grises, éviter les rouges marquées X');
     canvas.setAttribute('aria-describedby', 'factory-help'); element.append(canvas);
     const register = () => {};
-    this.scene.background = new THREE.Color('#353d39'); this.scene.fog = new THREE.Fog('#353d39', 25, 70);
-    this.scene.add(new THREE.HemisphereLight('#cfddd9', '#76604a', 2.5));
-    const light = new THREE.DirectionalLight('#ffdfac', 3); light.position.set(-4, 9, 6); this.scene.add(light);
-    const glow = new THREE.PointLight('#a5c7dd', 50, 25); glow.position.set(6, 4, -3); this.scene.add(glow);
-    const metal = '#657c70', cardboard = '#bc9363';
-    this.box(26, 0.3, 24, 0, -5.8, 4, '#77766a');
-    this.box(26, 13, 0.3, 0, 0.6, -5, '#8a9684');
-    for (let i = 0; i < 15; i++) this.box(0.045, 13, 0.09, -12 + i * 1.7, 0.6, -4.8, '#788575');
-    this.box(0.3, 13, 24, -12.8, 0.6, 5, '#657565');
-    for (const x of [-10, 10]) {
-      this.box(0.16, 10, 0.18, x, -0.6, -4.3, metal);
-      for (const y of [-4.6, -1.2, 2.2]) this.box(3.1, 0.18, 2.2, x, y, -3.8, metal);
-      for (let i = 0; i < 5; i++) this.box(1.18, 1.2, 1.35, x + (i % 2 - 0.5) * 1.35, i < 4 ? -3.85 + Math.floor(i / 2) * 1.2 : -0.5, -3.7, cardboard);
-    }
-    for (let i = 0; i < 5; i++) this.box(0.17, 10, 0.1, -10 + i * 5, -0.6, -4.68, '#b3b6a0');
+    // Salle d’usine et convoyeur procéduraux ; mêmes coordonnées de poste pour billes, carton et fiches.
+    this.hall = new FactoryHall(this.scene, this.eventLamp);
+    const metal = '#4e6b66', cardboard = '#bc9363';
     const plaque = new Page(this.scene, 7.8, 0.9, 0, 3.9, -4.6, register);
-    plaque.draw('title', '#344c42', c => { this.text(c, 'L’USINE DU COIN', 40, 22, 76, '#e8dcb8'); });
-    this.box(6, 0.2, 0.4, 0, 5.9, 0, metal);
-    this.box(5.5, 0.08, 0.34, 0, 5.76, 0, '#eee8c7');
-    const tube = new THREE.PointLight('#ffead0', 35, 16); tube.position.set(0, 5, 0); this.scene.add(tube);
-
-    this.box(14.8, 0.42, 7, 0, TABLE - 0.22, 0.4, '#a3ad96');
-    for (const x of [-6.4, 6.4]) for (const z of [-2, 2.8]) this.box(0.3, 4, 0.3, x, -3.6, z, metal);
-    this.box(15, 0.28, 0.18, 0, TABLE - 0.12, 3.92, '#567663');
-    for (let i = 0; i < 13; i++) this.box(0.1, 0.012, 1.1, -6 + i, TABLE + 0.012, 3.1, i % 2 ? '#5b675c' : '#d4ba7a');
-    // Le flux traverse l’ancien poste ; les grises cliquées rejoignent le carton.
-    this.box(10, 0.18, 4.2, -1.5, TABLE + 0.13, 0.3, '#354d43');
-    for (const z of [-1.86, 2.46]) this.box(10.2, 0.16, 0.12, -1.5, TABLE + 0.3, z, metal);
-    for (let lane = 0; lane < 4; lane++) {
-      for (let x = -6; x <= 3; x += 0.65) {
-        const mark = this.box(0.055, 0.02, 0.88, x, TABLE + 0.24, -1.3 + lane * 1.07, '#52685d');
-        mark.userData.baseX = x; this.beltMarks.push(mark);
-      }
-    }
-    this.box(0.8, 1.3, 4.35, -6.8, TABLE + 0.58, 0.3, '#728d80');
-    this.box(0.48, 0.16, 0.48, -6.8, TABLE + 1.3, 0.3, '#435b4d');
-    this.eventLamp.position.set(-6.8, TABLE + 1.53, 0.3); this.scene.add(this.eventLamp);
+    plaque.draw('title', '#e2b23c', c => { this.text(c, 'L’USINE DU COIN', 40, 22, 76, '#262826'); });
+    this.box(8.1, 1.1, 0.12, 0, 3.9, -4.68, metal);
     this.box(BOX.width, 0.12, BOX.depth, BOX.x, TABLE + 0.12, BOX.z, cardboard);
     for (const x of [BOX.x - BOX.width / 2, BOX.x + BOX.width / 2]) this.box(0.13, 1.55, BOX.depth, x, TABLE + 0.86, BOX.z, cardboard);
     for (const z of [BOX.z - BOX.depth / 2, BOX.z + BOX.depth / 2]) this.box(BOX.width, 1.55, 0.13, BOX.x, TABLE + 0.86, z, cardboard);
@@ -92,9 +63,12 @@ export class FactoryWork {
     this.box(BOX.width - 0.16, 0.03, BOX.depth - 0.16, BOX.x, TABLE + 0.22, BOX.z, '#cba570');
     const label = new Page(this.scene, 2.9, 0.65, BOX.x, TABLE + 0.87, BOX.z + BOX.depth / 2 + 0.08, register);
     label.draw('box', '#e5d5b2', c => this.text(c, 'BILLES · PLINKO', 65, 60, 92));
-    this.box(4.5, 2.4, 0.2, -3.7, 1.55, -2.5, '#536c5c');
+    // Fiches du service sur des tableaux fixés à des montants d’acier.
+    this.box(4.5, 2.4, 0.2, -3.7, 1.55, -2.5, metal);
+    for (const x of [-5.75, -1.65]) this.box(0.12, 2.6 - HALL.floor, 0.12, x, (2.6 + HALL.floor) / 2, -2.62, metal);
     this.counter = new Page(this.scene, 4.2, 2.1, -3.7, 1.55, -2.38, register);
-    this.box(4.3, 3, 0.12, 3.4, 2, -2.4, '#536c5c');
+    this.box(4.3, 3, 0.12, 3.4, 2, -2.4, metal);
+    for (const x of [1.45, 5.35]) this.box(0.12, 3.4 - HALL.floor, 0.12, x, (3.4 + HALL.floor) / 2, -2.52, metal);
     this.card = new Page(this.scene, 4.05, 2.75, 3.4, 2, -2.3, register);
     for (let i = 0; i < 18; i++) {
       const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(0.6, 1), new THREE.MeshBasicMaterial({ color: i < 5 ? '#f3b65a' : '#8e9184', transparent: true, opacity: 0, depthWrite: false }));
@@ -108,7 +82,7 @@ export class FactoryWork {
   }
   private box(w: number, h: number, d: number, x: number, y: number, z: number, color: string) {
     const mesh = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 1, Math.min(0.06, h / 3, d / 3)), new THREE.MeshStandardMaterial({ color, roughness: 0.8 }));
-    mesh.position.set(x, y, z); this.scene.add(mesh); return mesh;
+    mesh.position.set(x, y, z); mesh.castShadow = mesh.receiveShadow = true; this.scene.add(mesh); return mesh;
   }
   private text(c: CanvasRenderingContext2D, value: string, x: number, y: number, size: number, color = '#304b3d') {
     c.font = `bold ${size}px monospace`; c.fillStyle = color; c.fillText(value, x, y, 900);
@@ -213,14 +187,15 @@ export class FactoryWork {
     const lampColor = event?.warning ? '#efbc67' : definition?.color ?? '#91ad96';
     this.eventLamp.material.color.set(lampColor); this.eventLamp.material.emissive.set(lampColor);
     const beltTravel = reduced || f.legacy ? 0 : factoryClock(f.events, elapsed, 'belt') * 9.2 / CONFIG.factoryTravelDuration;
-    for (const mark of this.beltMarks) mark.position.x = -6.35 + ((mark.userData.baseX + 6.35 + beltTravel) % 9.75);
+    // La bande défile avec l’horloge du tapis (même vitesse que les billes), figée en mouvement réduit.
+    this.hall.beltTexture.offset.x = -beltTravel / HALL.beltTile;
     for (const [id, mesh] of this.balls) if (!f.balls.some(ball => ball.id === id)) {
       this.scene.remove(mesh); this.balls.delete(id);
     }
     for (const ball of f.balls) {
       let mesh = this.balls.get(ball.id);
       if (!mesh) {
-        mesh = new THREE.Mesh(this.sphere, ball.kind === 'red' ? this.red : this.silver);
+        mesh = new THREE.Mesh(this.sphere, ball.kind === 'red' ? this.red : this.silver); mesh.castShadow = true;
         mesh.userData = { id: ball.id, kind: ball.kind }; mesh.name = `factory:${ball.kind}:${ball.id}`;
         this.mark(mesh, ball.kind); this.balls.set(ball.id, mesh); this.scene.add(mesh);
       }

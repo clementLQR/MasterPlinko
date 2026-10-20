@@ -8,17 +8,19 @@ test.setTimeout(90000); // Plusieurs démarrages WebGL sous rendu logiciel peuve
 function equippedGame() {
   const game = new Game(newGame(), () => {}, () => 0.999); game.writable = true;
   for (let i = 0; i < 2; i++) { game.settle(game.launch()!.id); game.advance(500); }
-  game.buyPlan('azur.initial_repair'); game.installPlan('azur.initial_repair'); game.buyPlan('azur.auto_launcher'); game.installPlan('azur.auto_launcher'); game.buyPlan('azur.accounting_tray'); game.installPlan('azur.accounting_tray');
+  game.buyPlan('azur.initial_repair'); game.buyPlan('azur.auto_launcher'); game.buyPlan('azur.accounting_tray');
   game.setPreferences({ reducedMotion: true, quality: 'low' }); return game;
 }
 const saved = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('masterplinko.save')!));
 async function ready(page: Page) {
   await page.emulateMedia({ reducedMotion: 'reduce' }); await page.goto('/');
   await expect(page.locator('#scene')).toHaveAttribute('data-state', 'ready');
-  await expect(page.locator('#scene')).toHaveAttribute('data-rendered-view', 'plinko');
+  // Première image seulement après la compilation asynchrone des shaders (plusieurs secondes en WebGL).
+  await expect(page.locator('#scene')).toHaveAttribute('data-rendered-view', 'plinko', { timeout: 30000 });
 }
 async function view(page: Page, key: string, name: string) {
-  await page.keyboard.press(key); await expect(page.locator('#scene')).toHaveAttribute('data-rendered-view', name);
+  // Après un rechargement, la première image attend la compilation asynchrone des shaders.
+  await page.keyboard.press(key); await expect(page.locator('#scene')).toHaveAttribute('data-rendered-view', name, { timeout: 30000 });
 }
 async function focus(page: Page, action: string) {
   await page.locator('#scene canvas').focus();
@@ -70,7 +72,7 @@ test('aimants 3D : attraction, rail, survol et clavier sans modifier le paiement
     let sample = 0.999;
     const game = new Game(newGame(), () => {}, () => sample, { magnetsTrial: true }); game.writable = true;
     for (let i = 0; i < 2; i++) { game.settle(game.launch().id); game.advance(500); }
-    game.buyPlan('azur.initial_repair'); game.installPlan('azur.initial_repair'); game.buyPlan('azur.auto_launcher'); game.installPlan('azur.auto_launcher'); game.buyPlan('azur.accounting_tray'); game.installPlan('azur.accounting_tray');
+    game.buyPlan('azur.initial_repair'); game.buyPlan('azur.auto_launcher'); game.buyPlan('azur.accounting_tray');
     game.state.preferences = { sound: false, quality: 'low', reducedMotion: false };
     game.toggleAuto(); game.state.magnetCooldownMs = 0; sample = 0;
     const ball = game.launch('auto'), nav = new Navigation(), element = document.getElementById('fixture')!;
@@ -143,7 +145,7 @@ test('collecteur 3D : réservoir, consultation souris/clavier et récompense san
     // @ts-expect-error module Vite de la fixture
     const { newGame } = await import('/src/game/state.ts');
     let sample = 0.999; const game = new Game(newGame(), () => {}, () => sample, { collectorTrial: true }); game.writable = true;
-    for (let i = 0; i < 2; i++) { game.settle(game.launch().id); game.advance(500); } game.buyPlan('azur.initial_repair'); game.installPlan('azur.initial_repair'); sample = 0;
+    for (let i = 0; i < 2; i++) { game.settle(game.launch().id); game.advance(500); } game.buyPlan('azur.initial_repair'); sample = 0;
     for (let i = 0; i < 9; i++) { game.settle(game.launch().id); game.advance(500); }
     game.state.preferences = { sound: false, quality: 'low', reducedMotion: true };
     const nav = new Navigation(), scene: any = new PlinkoScene(document.getElementById('fixture')!, nav, (action: string) => {
@@ -321,7 +323,7 @@ test('nouvelle partie : aucun ancien vol ne survit lorsque les identifiants reco
   expect(result.arrival.x).toBeCloseTo(result.expectedX, 8); expect(result.arrival.credit).toBe(4000);
 });
 
-test('plans : achat chez Azur puis montage dans la cave sans second paiement', async ({ page }) => {
+test('achats chez Azur : réparation et améliorations installées dès le paiement, retour direct à la cave', async ({ page }) => {
   test.setTimeout(180000);
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const game = new Game(newGame(), () => {}, () => 0.999); game.writable = true;
@@ -330,38 +332,38 @@ test('plans : achat chez Azur puis montage dans la cave sans second paiement', a
   await page.addInitScript(state => { if (!localStorage.getItem('masterplinko.save')) localStorage.setItem('masterplinko.save', JSON.stringify(state)); }, game.state);
   await page.setViewportSize({ width: 1280, height: 720 }); await ready(page);
   const shop = page.locator('#shop-scene');
-  async function visit() { await page.keyboard.press('s'); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'destinations'); await page.locator('[data-destination="azur"]').click(); await expect(shop).toHaveAttribute('data-view', 'entrance', { timeout: 20000 }); await shop.locator('canvas').focus(); }
   async function use(action: string) {
     for (let i = 0; i < 20; i++) { await page.keyboard.press('Tab'); if (await shop.getAttribute('data-focused-action') === action) { await page.keyboard.press('Enter'); return; } }
     throw new Error(`Shop object inaccessible: ${action}`);
   }
-  async function home() { for (let i = 0; i < 8 && await page.locator('#app').getAttribute('data-departure') === 'shop'; i++) await page.keyboard.press('Escape'); await page.locator('[data-destination="return"]').click(); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'cave'); }
-  await activate(page, 'montage'); await activate(page, 'install:azur.initial_repair');
-  expect((await saved(page)).walletCents).toBe(game.state.walletCents); expect((await saved(page)).repairPurchased).toBe(false);
-  await page.keyboard.press('Escape'); await visit(); await use('repair-plan'); await expect(shop).toHaveAttribute('data-view', 'devis');
+  // Plus aucune trappe de montage sur la machine.
+  await page.locator('#scene canvas').focus();
+  for (let i = 0; i < 30; i++) { await page.keyboard.press('Tab'); expect(await page.locator('#scene').getAttribute('data-focused-action')).not.toMatch(/^(montage|install:)/); }
+  await page.keyboard.press('s'); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'destinations');
+  await page.locator('[data-destination="azur"]').click(); await expect(shop).toHaveAttribute('data-view', 'entrance', { timeout: 20000 }); await shop.locator('canvas').focus();
+  await use('repair-plan'); await expect(shop).toHaveAttribute('data-view', 'devis');
   await page.mouse.move(1278, 718); await page.screenshot({ path: 'test-results/azur-plan-reparation.png' });
   await use('buy-repair-plan'); const bought = await saved(page);
-  expect(bought.plans).toEqual(['azur.initial_repair']); expect(bought.upgrades).toEqual([]); expect(bought.repairPurchased).toBe(false);
+  expect(bought.plans).toEqual([]); expect(bought.upgrades).toEqual(['azur.initial_repair']); expect(bought.repairPurchased).toBe(true);
   expect(bought.walletCents).toBe(game.state.walletCents - 2500);
   await use('buy-repair-plan'); expect((await saved(page)).walletCents).toBe(bought.walletCents);
-  await page.keyboard.press('Escape'); await use('backroom'); await expect(shop).toHaveAttribute('data-view', 'counter');
-  await home(); await page.reload(); await expect(page.locator('#scene')).toHaveAttribute('data-state', 'ready');
-  expect((await saved(page)).plans).toEqual(bought.plans);
-  await activate(page, 'montage'); await expect(page.locator('#scene')).toHaveAttribute('data-rendered-view', 'montage');
-  await page.mouse.move(1278, 718); await page.screenshot({ path: 'test-results/plinko-montage-plans.png' });
-  await activate(page, 'install:azur.initial_repair'); expect((await saved(page)).repairPurchased).toBe(true); expect((await saved(page)).walletCents).toBe(bought.walletCents);
-  await page.keyboard.press('Escape'); await visit(); await use('backroom'); await expect(shop).toHaveAttribute('data-view', 'workshop'); await use('plans');
+  // La porte privée s’ouvre pendant la même visite.
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await expect(shop).toHaveAttribute('data-view', 'entrance');
+  await use('backroom'); await expect(shop).toHaveAttribute('data-view', 'workshop'); await use('plans');
   await page.keyboard.press('ArrowRight'); await expect(shop).toHaveAttribute('data-plan-page', '2');
   await page.mouse.move(1278, 718); await page.screenshot({ path: 'test-results/azur-achat-plan-doigt.png' });
-  await use('plans-buy'); expect((await saved(page)).upgrades).toEqual(['azur.initial_repair']); expect((await saved(page)).plans).toEqual(['azur.auto_launcher']);
+  await use('plans-buy'); expect((await saved(page)).upgrades).toEqual(['azur.initial_repair', 'azur.auto_launcher']); expect((await saved(page)).plans).toEqual([]);
   await page.keyboard.press('ArrowRight'); await use('plans-buy'); const paid = await saved(page);
-  expect(paid.plans).toEqual(['azur.auto_launcher', 'azur.accounting_tray']); expect(paid.stats.upgradeExpenses).toBe(8000);
+  expect(paid.upgrades).toEqual(['azur.initial_repair', 'azur.auto_launcher', 'azur.accounting_tray']); expect(paid.plans).toEqual([]); expect(paid.stats.upgradeExpenses).toBe(8000);
   await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await expect(shop).toHaveAttribute('data-plan-page', '6');
   for (let i = 0; i < 7; i++) { await page.keyboard.press('Tab'); expect(await shop.getAttribute('data-focused-action')).not.toBe('plans-buy'); }
-  await home(); await activate(page, 'montage'); await activate(page, 'install:azur.auto_launcher'); await activate(page, 'install:azur.accounting_tray');
-  const installed = await saved(page); expect(installed.plans).toEqual([]); expect(installed.upgrades).toHaveLength(3); expect(installed.walletCents).toBe(paid.walletCents);
-  await activate(page, 'install:azur.auto_launcher'); expect((await saved(page)).walletCents).toBe(installed.walletCents);
-  await page.keyboard.press('Escape'); await expect(page.locator('#scene')).toHaveAttribute('data-modules', 'auto_launcher,accounting_tray');
+  // Échap ferme le carnet, puis rentre directement à la cave sans repasser par la boutique.
+  await page.keyboard.press('Escape'); await expect(shop).toHaveAttribute('data-view', 'workshop');
+  await page.keyboard.press('Escape'); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'cave', { timeout: 16000 });
+  expect((await saved(page)).walletCents).toBe(paid.walletCents);
+  await expect(page.locator('#scene')).toHaveAttribute('data-modules', 'auto_launcher,accounting_tray');
+  await page.reload(); await expect(page.locator('#scene')).toHaveAttribute('data-state', 'ready');
+  expect((await saved(page)).upgrades).toEqual(paid.upgrades); await expect(page.locator('#scene')).toHaveAttribute('data-modules', 'auto_launcher,accounting_tray');
   expect(await page.locator('button:visible,header:visible,aside:visible,dialog:visible').count()).toBe(0); expect(errors).toEqual([]);
 });
 
@@ -383,23 +385,19 @@ test('plans achetés : Aimants à 200, Collecteur à 120 et fonctionnement sans 
   await use('backroom'); await expect(shop).toHaveAttribute('data-view', 'workshop'); await use('plans');
   for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
   await expect(shop).toHaveAttribute('data-plan-title', 'Aimants'); await use('plans-buy');
-  expect((await saved(page)).walletCents).toBe(before - 20000); expect((await saved(page)).upgrades).toEqual(game.state.upgrades);
+  expect((await saved(page)).walletCents).toBe(before - 20000);
+  expect((await saved(page)).upgrades).toEqual([...game.state.upgrades, 'azur.magnets']);
   await use('plans-buy'); expect((await saved(page)).walletCents).toBe(before - 20000);
   await page.mouse.move(1278, 718); await page.screenshot({ path: 'test-results/azur-plan-aimants.png' });
   await page.keyboard.press('ArrowRight'); await expect(shop).toHaveAttribute('data-plan-title', 'Collecteur de ratés');
-  await use('plans-buy'); const paid = await saved(page); expect(paid.walletCents).toBe(before - 32000); expect(paid.plans).toEqual(['azur.magnets', 'azur.collector']);
+  await use('plans-buy'); const paid = await saved(page); expect(paid.walletCents).toBe(before - 32000); expect(paid.plans).toEqual([]); expect(paid.upgrades).toHaveLength(5); expect(paid.stats.upgradeExpenses).toBe(40000);
   await page.mouse.move(1278, 718); await page.screenshot({ path: 'test-results/azur-plan-collecteur.png' });
-  for (let i = 0; i < 3; i++) await page.keyboard.press('Escape');
-  await page.locator('[data-destination="return"]').click(); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'cave');
+  // Carnet puis atelier : Échap rentre directement à la cave.
+  await page.keyboard.press('Escape'); await expect(shop).toHaveAttribute('data-view', 'workshop');
+  await page.keyboard.press('Escape'); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'cave', { timeout: 16000 });
   await page.reload(); await expect(page.locator('#scene')).toHaveAttribute('data-state', 'ready');
-  expect((await saved(page)).plans).toEqual(paid.plans); await expect(page.locator('#scene')).toHaveAttribute('data-modules', 'auto_launcher,accounting_tray');
-  await activate(page, 'montage'); await expect(page.locator('#scene')).toHaveAttribute('data-rendered-view', 'montage');
-  await page.mouse.move(1278, 718); await page.screenshot({ path: 'test-results/plinko-montage-aimants-collecteur.png' });
-  await activate(page, 'install:azur.magnets'); await activate(page, 'install:azur.collector');
-  const installed = await saved(page); expect(installed.plans).toEqual([]); expect(installed.upgrades).toHaveLength(5); expect(installed.walletCents).toBe(paid.walletCents); expect(installed.stats.upgradeExpenses).toBe(40000);
-  await activate(page, 'montage-prev'); await activate(page, 'install:azur.accounting_tray'); expect((await saved(page)).walletCents).toBe(paid.walletCents);
-  await activate(page, 'montage-next'); await activate(page, 'install:azur.magnets'); expect((await saved(page)).walletCents).toBe(paid.walletCents);
-  await page.keyboard.press('Escape'); await expect(page.locator('#scene')).toHaveAttribute('data-modules', 'auto_launcher,accounting_tray,magnets,collector');
+  expect((await saved(page)).upgrades).toEqual(paid.upgrades); expect((await saved(page)).walletCents).toBe(paid.walletCents);
+  await expect(page.locator('#scene')).toHaveAttribute('data-modules', 'auto_launcher,accounting_tray,magnets,collector');
   await activate(page, 'auto');
   await expect.poll(async () => (await saved(page)).pendingBalls.some((ball: any) => ball.magnetFrom !== undefined), { timeout: 14000 }).toBe(true);
   await expect.poll(async () => (await saved(page)).pendingBalls.some((ball: any) => ball.origin === 'collector'), { timeout: 30000 }).toBe(true);
@@ -413,7 +411,7 @@ test('plans achetés : Aimants à 200, Collecteur à 120 et fonctionnement sans 
   expect(await page.locator('button:visible,header:visible,aside:visible,dialog:visible').count()).toBe(0); expect(errors).toEqual([]);
 });
 
-test('cave : livre retire, etabli conserve et trappe 3D accessible souris et clavier', async ({ page }) => {
+test('cave : livre retiré, établi conservé et aucune trappe de montage', async ({ page }) => {
   for (const viewport of [{ width: 1280, height: 720 }, { width: 1920, height: 911 }]) {
     await page.setViewportSize(viewport); await page.goto('/tests/render.html');
     const result = await page.evaluate(async () => {
@@ -435,14 +433,11 @@ test('cave : livre retire, etabli conserve et trappe 3D accessible souris et cla
         canvas.dispatchEvent(new MouseEvent('click', { clientX: (point.x + 1) * rect.width / 2, clientY: (1 - point.y) * rect.height / 2 }));
         return Math.abs(point.x) < 1 && Math.abs(point.y) < 1 && actions.length === before + 1 && actions.at(-1) === action;
       };
-      const fromMachine = click('montage'); nav.go('montage', true); scene.frame(state, 0, false, () => true);
-      const installs = ['install:azur.initial_repair', 'install:azur.auto_launcher', 'install:azur.accounting_tray'].map(click);
-      scene.setInterface({ canWrite: true, autoEnabled: false, message: '', historyPage: 0, installationPage: 1 }); scene.frame(state, 0, false, () => true);
-      const newInstalls = ['install:azur.magnets', 'install:azur.collector'].map(click);
       nav.go('azur', true); scene.frame(state, 0, false, () => true);
-      return { fromMachine, installs, newInstalls, bookAbsent: !scene.scene.getObjectByName('support:catalogue'), cameraFacesRight: scene.camera.getWorldDirection(scene.camera.position.clone()).x > 0.9, noPurchases: !scene.clickTargets.some((o: any) => o.userData.action.startsWith('buy:')) };
+      const noMounting = !scene.clickTargets.some((o: any) => o.userData.action === 'montage' || o.userData.action.startsWith('install:')) && !scene.scene.getObjectByName('machine:montage');
+      return { noMounting, bookAbsent: !scene.scene.getObjectByName('support:catalogue'), cameraFacesRight: scene.camera.getWorldDirection(scene.camera.position.clone()).x > 0.9, noPurchases: !scene.clickTargets.some((o: any) => o.userData.action.startsWith('buy:')) };
     });
-    expect(result).toEqual({ fromMachine: true, installs: [true, true, true], newInstalls: [true, true], bookAbsent: true, cameraFacesRight: true, noPurchases: true });
+    expect(result).toEqual({ noMounting: true, bookAbsent: true, cameraFacesRight: true, noPurchases: true });
   }
 });
 
@@ -472,7 +467,7 @@ test('escalier : trajet unique, clavier bloqué, destinations noires et descente
   await focus(page, 'auto'); await expect(page.locator('#accessibility-status')).toContainText('Activer le Doigt');
 });
 
-test('départ refusé avec une bille, fondu réduit et service explicite repris sans double salaire', async ({ page }) => {
+test('départ avec une bille en vol : réglée une fois au retour figé, fondu réduit et service repris sans double salaire', async ({ page }) => {
   test.setTimeout(120000);
   await page.addInitScript(() => { Math.random = () => 0.5; });
   const game = equippedGame(); game.toggleAuto();
@@ -480,10 +475,12 @@ test('départ refusé avec une bille, fondu réduit et service explicite repris 
   game.activateBonus();
   await page.addInitScript(state => { if (!localStorage.getItem('masterplinko.save')) localStorage.setItem('masterplinko.save', JSON.stringify(state)); }, game.state);
   await ready(page); await activate(page, 'launch');
-  await page.keyboard.press('s'); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'cave');
-  await expect(page.locator('#accessibility-status')).toContainText('Attendez');
-  await expect.poll(async () => (await saved(page)).pendingBalls.length, { timeout: 15000 }).toBe(0);
+  const flying = await saved(page); expect(flying.pendingBalls).toHaveLength(1);
+  const expectedWallet = flying.walletCents + flying.pendingBalls[0].returnCents;
   await page.keyboard.press('s'); await expect(page.locator('#outside')).toBeVisible();
+  // La bille déjà lancée est réglée une seule fois avec son retour figé, sans nouveau lancement.
+  await expect.poll(async () => (await saved(page)).pendingBalls.length).toBe(0);
+  expect((await saved(page)).walletCents).toBe(expectedWallet); expect((await saved(page)).stats.launched).toBe(flying.stats.launched);
   const paused = (await saved(page)).bonusRemainingMs;
   await page.waitForTimeout(1200); expect((await saved(page)).bonusRemainingMs).toBe(paused);
   expect((await saved(page)).factoryRemainingMs).toBe(0);
@@ -556,7 +553,9 @@ test('boutique publique : visite explicite, objets au clavier, horloges figées 
   await shopFocus('backroom'); await expect(page.locator('#shop-status')).toContainText('trajet automatique');
   await page.keyboard.press('Enter'); await expect(shop).toHaveAttribute('data-view', 'workshop');
   await expect(page.locator('#app')).toHaveAttribute('data-departure', 'shop'); expect(await saved(page)).toEqual(before);
-  await page.keyboard.press('Escape'); await expect(shop).toHaveAttribute('data-view', 'entrance');
+  // Échap rentrerait à la cave : la plaque Boutique ramène à l’entrée.
+  for (let i = 0; i < 14 && await shop.getAttribute('data-focused-action') !== 'return-shop'; i++) await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter'); await expect(shop).toHaveAttribute('data-view', 'entrance');
   await shopFocus('counter'); await page.keyboard.press('Enter');
   await expect(shop).toHaveAttribute('data-view', 'counter'); await expect(shop).toHaveAttribute('data-moving', 'false');
   await page.mouse.move(1818, 862); await page.screenshot({ path: 'test-results/azur-comptoir.png' });
@@ -631,10 +630,8 @@ test('atelier caché : réparation requise, radio, prototypes décoratifs et ret
   await visit(); const locked = await saved(page);
   await shopAction('backroom'); await expect(shop).toHaveAttribute('data-view', 'entrance'); await expect(page.locator('#shop-status')).toContainText('réparation'); expect(await saved(page)).toEqual(locked);
   await shopAction('repair-plan'); await shopAction('buy-repair-plan');
-  await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
-  await page.locator('[data-destination="return"]').click(); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'cave');
-  await activate(page, 'montage'); await activate(page, 'install:azur.initial_repair');
-  await page.keyboard.press('Escape'); await visit(); const before = await saved(page);
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await expect(shop).toHaveAttribute('data-view', 'entrance');
+  const before = await saved(page);
   expect(before.upgrades).toEqual(['azur.initial_repair']);
   await shopAction('backroom'); await expect(shop).toHaveAttribute('data-view', 'workshop'); await expect(shop).toHaveAttribute('data-secret', 'open');
   await page.mouse.move(1278, 718); await page.screenshot({ path: 'test-results/azur-atelier-automatique.png' });
@@ -662,6 +659,9 @@ test('atelier caché : réparation requise, radio, prototypes décoratifs et ret
   await page.keyboard.press('Escape'); await page.locator('[data-destination="azur"]').click(); await expect(shop).toHaveAttribute('data-secret', 'closed');
   await expect(shop).toHaveAttribute('data-plan-page', '1');
   await shopAction('backroom'); await expect(shop).toHaveAttribute('data-view', 'workshop');
+  // Plaque Maison : retour direct à la cave, sans trajet vers la boutique.
+  await shopAction('go-home'); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'cave', { timeout: 16000 });
+  expect(await saved(page)).toEqual(before);
   await page.reload(); await expect(page.locator('#scene')).toHaveAttribute('data-state', 'ready'); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'cave');
   const resumed = await saved(page); expect(resumed.walletCents).toBe(before.walletCents); expect(resumed.upgrades).toEqual(before.upgrades); expect(resumed.history).toEqual(before.history); expect(resumed.saveVersion).toBe(6);
   expect(errors).toEqual([]);
@@ -1025,9 +1025,10 @@ test('événements 3D : préavis, surcadence réelle, retour normal, pause et re
   await page.screenshot({ path: 'test-results/usine-ralentissement.png' });
   const reduced = await page.evaluate(() => {
     const { game, work } = (window as any).eventFixture;
-    work.frame(game.state, 0, true); const positions = work.beltMarks.map((mark: any) => mark.position.x);
+    // La bande défile par sa texture : en mouvement réduit, son décalage reste fixe.
+    work.frame(game.state, 0, true); const offset = work.hall.beltTexture.offset.x;
     game.advance(1000, true, 'factory'); work.frame(game.state, 0, true);
-    const staticMarks = positions.every((x: number, index: number) => x === work.beltMarks[index].position.x);
+    const staticMarks = work.hall.beltTexture.offset.x === offset;
     return { staticMarks, wallet: game.state.walletCents, hits: game.state.factory.greyHits };
   });
   expect(reduced).toEqual({ staticMarks: true, wallet: 1900, hits: 0 });
@@ -1046,8 +1047,9 @@ test('rouge dans le jeu : explosion, gains perdus, reprise sans salaire et nouve
   await expect(page.locator('#app')).toHaveAttribute('data-departure', 'destinations');
   await expect(page.locator('#outside-message')).toContainText('Explosion');
   expect((await saved(page)).walletCents).toBe(1900); expect((await saved(page)).stats.factoryIncome).toBe(0);
-  await page.reload(); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'cave');
+  await page.reload(); await expect(page.locator('#scene')).toHaveAttribute('data-state', 'ready'); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'cave');
   expect((await saved(page)).factory.status).toBe('exploded');
+  await expect(page.locator('#scene')).toHaveAttribute('data-rendered-view', 'plinko', { timeout: 30000 });
   await page.keyboard.press('s'); await expect(page.locator('#outside')).toBeVisible();
   expect((await saved(page)).factoryRemainingMs).toBe(0);
   await page.getByRole('button', { name: 'Aller travailler à l’usine' }).click();

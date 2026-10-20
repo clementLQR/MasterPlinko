@@ -11,11 +11,11 @@ Les noms Résidus, Échos et Recalibrage sont des propositions de travail. Évit
 
 ## Azur : production et automatisation
 ### Acheter un plan, puis l’installer
-Le livre de l’établi de la cave est retiré. Après la panne, sortir par l’escalier et rendre visite à Azur : le **devis au comptoir public** vend le plan de réparation pour **25 pièces**. Revenir sur le Plinko et cliquer sa **trappe de montage** pour installer le plan ; la machine reste en panne jusque-là. Le montage attend zéro bille et ne prélève aucun nouveau paiement.
+Le livre de l’établi de la cave est retiré. Après la panne, sortir par l’escalier et rendre visite à Azur : le **devis au comptoir public** vend la réparation pour **25 pièces**, installée dès le paiement (zéro bille en cours). Décision du créateur du 19 octobre 2026 : la trappe de montage est supprimée, chaque achat installe directement l’amélioration.
 
-La réparation installée ouvre l’atelier privé d’Azur. Un clic sur la porte derrière le comptoir enchaîne automatiquement réserve, ouverture du passage et entrée ; le repère Boutique ou Échap depuis la vue principale ramène directement dans la boutique. Dans son carnet feuilletable, acheter les plans du **Doigt mécanique (40 pièces)**, du **Bac comptable (15 pièces)**, des **Aimants (200 pièces)** et du **Collecteur de ratés (120 pièces)** sur leurs doubles pages, puis les installer sur le Plinko au retour. Consultation et feuilletage restent gratuits ; les études futures et essais DEV restent sans achat ni prix inventé. Aucun achat d’appareil ordinaire ajouté dans la boutique.
+La réparation ouvre l’atelier privé d’Azur, dès la même visite. Un clic sur la porte derrière le comptoir enchaîne automatiquement réserve, ouverture du passage et entrée ; depuis la vue principale, la plaque Maison ou Échap ramène directement à la cave, la plaque Boutique dans la boutique. Dans son carnet feuilletable, acheter les plans du **Doigt mécanique (40 pièces)**, du **Bac comptable (15 pièces)**, des **Aimants (200 pièces)** et du **Collecteur de ratés (120 pièces)** sur leurs doubles pages : ils sont installés dès l’achat. Consultation et feuilletage restent gratuits ; les études futures et essais DEV restent sans achat ni prix inventé. Aucun achat d’appareil ordinaire ajouté dans la boutique.
 
-Les plans payés non installés sont sauvegardés ; achat et montage sont chacun atomiques et uniques. Les anciens modules restent installés, sans repayer. Le format actuel est **6**, migration des formats 1/2/3/4/5 ; détails de validation au fichier 10.
+Chaque achat est atomique, unique et installe le module ; les plans payés non montés des anciennes sauvegardes sont installés au chargement sans nouveau débit. Les anciens modules restent installés, sans repayer. Le format actuel est **6**, migration des formats 1/2/3/4/5 ; détails de validation au fichier 10.
 
 ### Modules uniques
 | Module | Effet |
@@ -159,8 +159,8 @@ Les trois améliorations sont uniques, sans niveaux :
 | azur.initial_repair | Réparation initiale | 25 pièces | À la panne de test (50 pièces de retours cumulés), remet en marche et ouvre l'atelier |
 | azur.auto_launcher | Doigt mécanique | 40 pièces | Après réparation ; produit une bille gratuite de base 1 toutes les 2 secondes |
 | azur.accounting_tray | Bac comptable | 15 pièces | Après réparation ; ouvre les 100 derniers résultats avec origine, mise/base, multiplicateurs, retour et net |
-| azur.magnets | Aimants | 200 pièces | Réparation et Doigt installés ; acheter le plan chez Azur puis monter le rail sur le Plinko |
-| azur.collector | Collecteur de ratés | 120 pièces | Réparation installée ; plan chez Azur puis montage du réservoir sur le Plinko, Doigt facultatif |
+| azur.magnets | Aimants | 200 pièces | Réparation et Doigt installés ; achat chez Azur, installé immédiatement |
+| azur.collector | Collecteur de ratés | 120 pièces | Réparation installée ; achat chez Azur, installé immédiatement, Doigt facultatif |
 
 Le solde, la mise et le dernier résultat restent visibles avant l'achat du Bac comptable.
 Panne unique et aucune perte de bille. L'usine reste accessible pendant la panne.

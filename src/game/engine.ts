@@ -2,7 +2,7 @@ import { CONFIG, EXITS, UPGRADES } from '../config';
 import type { UpgradeId } from '../config';
 import { drawOutcome } from './outcomes';
 import { magnetExit } from './magnets';
-import { purchaseIssue, installationIssue } from './plans';
+import { purchaseIssue } from './plans';
 import type { Random } from './outcomes';
 import { isBroken, newGame } from './state';
 import { advanceFactory, factoryReward, newFactory, planFactoryEvents } from './packing';
@@ -134,30 +134,28 @@ export class Game {
 
   buyPlan(id: UpgradeId): boolean {
     const s = this.state;
-    if (!this.available() || s.factoryRemainingMs > 0 || !Object.hasOwn(UPGRADES, id)) return false;
+    if (!this.available() || !Object.hasOwn(UPGRADES, id)) return false;
     const issue = purchaseIssue(s, id);
     if (issue) { this.notice = issue; return false; }
     const item = UPGRADES[id];
-    if (s.walletCents < item.price) { this.notice = 'Il manque quelques pièces. L’usine reste ouverte.'; return false; }
+    // Achat et installation forment une seule transaction : aucun plan en attente.
     const next = structuredClone(s);
     next.walletCents -= item.price;
     next.stats.upgradeExpenses += item.price;
-    next.plans.push(id);
-    if (!this.commit(next)) return false;
-    this.notice = `Plan ${item.name} acheté. De retour dans la cave, utilisez la trappe de montage du Plinko.`;
-    return true;
-  }
-
-  installPlan(id: UpgradeId): boolean {
-    if (!this.available() || !Object.hasOwn(UPGRADES, id)) return false;
-    const issue = installationIssue(this.state, id);
-    if (issue) { this.notice = issue; return false; }
-    const next = structuredClone(this.state);
-    next.plans = next.plans.filter(plan => plan !== id);
     next.upgrades.push(id);
     if (id === 'azur.initial_repair') next.repairPurchased = true;
     if (!this.commit(next)) return false;
-    this.notice = id === 'azur.initial_repair' ? '« Normalement, ça tient. » — Azur. Machine réparée, atelier privé accessible.' : `${UPGRADES[id].name} installé. Plan utilisé, aucun nouveau débit.`;
+    this.notice = id === 'azur.initial_repair' ? '« Normalement, ça tient. » — Azur. Machine réparée, atelier privé accessible.' : `${item.name} installé par Azur. Il fonctionne dès le retour dans la cave.`;
+    return true;
+  }
+
+  /** Règle en une écriture les billes encore en vol, avec leur retour figé (départ par l'escalier). */
+  settleAll(): boolean {
+    if (!this.available()) return false;
+    if (!this.state.pendingBalls.length) return true;
+    const next = reconcile(this.state).state;
+    if (!this.commit(next)) return false;
+    if (isBroken(next)) this.autoEnabled = false;
     return true;
   }
 
@@ -246,7 +244,11 @@ export class Game {
     }
     if (clock === 'all' && this.autoEnabled && !isBroken(this.state) && this.state.factoryRemainingMs === 0) {
       this.autoElapsed += ms;
-      if (this.autoElapsed >= CONFIG.autoInterval) { this.autoElapsed = 0; this.launch('auto'); }
+      // Reporter l'excédent garde la cadence de 2 s ; un refus (plafond) repart de zéro, sans file.
+      if (this.autoElapsed >= CONFIG.autoInterval) {
+        const overrun = Math.min(this.autoElapsed - CONFIG.autoInterval, CONFIG.autoInterval - 1);
+        this.autoElapsed = this.launch('auto') ? overrun : 0;
+      }
     }
   }
 
@@ -256,6 +258,7 @@ export class Game {
     if (!this.commit(next)) return false;
     this.autoEnabled = false;
     this.autoElapsed = 0;
+    this.fractionalMs = 0;
     this.notice = 'Partie importée. Les billes en cours ont été réglées ; l’automatisation est arrêtée.';
     return true;
   }

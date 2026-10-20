@@ -30,8 +30,7 @@ function outcomeRandom(multiplier: number) {
 }
 
 function buyInstalled(game: Game, id: UpgradeId) {
-  if (id === 'azur.initial_repair' && game.state.pendingBalls.length) return false;
-  return game.buyPlan(id) && game.installPlan(id);
+  return game.buyPlan(id);
 }
 
 function atelier(random = () => 0.999, magnetsTrial = false, collectorTrial = false) {
@@ -44,20 +43,17 @@ function atelier(random = () => 0.999, magnetsTrial = false, collectorTrial = fa
 }
 
 describe('Règles économiques et transactions', () => {
-  it('vend les Aimants à 200 et le Collecteur à 120, sans activer les plans avant montage', () => {
+  it('vend les Aimants à 200 et le Collecteur à 120, installés dès l’achat sans second débit', () => {
     const { game } = atelier();
     const poor = structuredClone(game.state); expect(game.buyPlan('azur.magnets')).toBe(false); expect(game.buyPlan('azur.collector')).toBe(false); expect(game.state).toEqual(poor);
     // Fixture de salaires historiques cohérente avec le bilan monétaire, sans modifier les prix.
     game.state.walletCents += 40000; game.state.stats.factoryIncome += 40000; const before = game.state.walletCents;
-    expect(game.buyPlan('azur.magnets')).toBe(true); expect(game.state.walletCents).toBe(before - 20000); expect(game.magnetsAvailable).toBe(false);
-    expect(game.buyPlan('azur.collector')).toBe(true); expect(game.state.walletCents).toBe(before - 32000); expect(game.collectorAvailable).toBe(false);
+    expect(game.buyPlan('azur.magnets')).toBe(true); expect(game.state.walletCents).toBe(before - 20000); expect(game.magnetsAvailable).toBe(true);
+    expect(game.buyPlan('azur.collector')).toBe(true); expect(game.state.walletCents).toBe(before - 32000); expect(game.collectorAvailable).toBe(true);
     expect(game.buyPlan('azur.magnets')).toBe(false); expect(game.buyPlan('azur.collector')).toBe(false);
-    expect(game.installPlan('azur.magnets')).toBe(true); expect(game.installPlan('azur.collector')).toBe(true);
     expect(game.state.walletCents).toBe(before - 32000); expect(game.state.plans).toEqual([]); expect(game.state.stats.upgradeExpenses).toBe(38500);
-    expect(game.magnetsAvailable).toBe(true); expect(game.collectorAvailable).toBe(true);
     const resumed = new Game(parseSnapshot(JSON.stringify(game.state)), () => {});
     expect(resumed.magnetsAvailable).toBe(true); expect(resumed.collectorAvailable).toBe(true); expect(resumed.autoEnabled).toBe(false);
-    expect(game.installPlan('azur.magnets')).toBe(false); expect(game.state.walletCents).toBe(before - 32000);
   });
   it('garde les prérequis des modules, sans exiger le Doigt pour le Collecteur', () => {
     const { game } = setup(() => 0.999); game.state.walletCents += 40000; game.state.stats.factoryIncome += 40000;
@@ -85,69 +81,81 @@ describe('Règles économiques et transactions', () => {
     game.settle(reward.id); expect(game.state.collectorCharge).toBe(0); expect(game.state.magnetCooldownMs).toBe(0);
     expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state);
   });
-  it('n’active pas un module acheté si l’écriture du montage échoue', () => {
+  it('n’active pas un module si l’écriture de l’achat échoue', () => {
     const context = atelier(), { game } = context; game.state.walletCents += 40000; game.state.stats.factoryIncome += 40000;
-    game.buyPlan('azur.magnets'); const before = structuredClone(game.state); context.fail(true);
-    expect(game.installPlan('azur.magnets')).toBe(false); expect(game.state).toEqual(before); expect(game.magnetsAvailable).toBe(false);
-    context.fail(false); game.retrySave(); expect(game.installPlan('azur.magnets')).toBe(true); expect(game.state.walletCents).toBe(before.walletCents);
-    expect(game.magnetsAvailable).toBe(true);
+    const before = structuredClone(game.state); context.fail(true);
+    expect(game.buyPlan('azur.magnets')).toBe(false); expect(game.state).toEqual(before); expect(game.magnetsAvailable).toBe(false);
+    context.fail(false); game.retrySave(); expect(game.buyPlan('azur.magnets')).toBe(true);
+    expect(game.state.walletCents).toBe(before.walletCents - 20000); expect(game.magnetsAvailable).toBe(true);
   });
-  it('migre le format 5 en conservant plans payés, réserve et paiements figés sans offrir de modules', () => {
+  it('migre le format 5 en installant les plans déjà payés, sans nouveau débit ni module offert', () => {
     let sample = 0.999; const { game } = atelier(() => sample, true, true);
-    game.buyPlan('azur.accounting_tray'); game.toggleAuto(); game.state.magnetCooldownMs = 0; sample = 0;
+    game.toggleAuto(); game.state.magnetCooldownMs = 0; sample = 0;
     const ball = game.launch('auto')!; game.state.collectorCharge = 9;
+    // Ancien contrat : Bac payé mais pas encore monté.
     const old = JSON.parse(JSON.stringify(game.state)); old.saveVersion = 5;
-    const migrated = parseSnapshot(JSON.stringify(old)); expect(migrated.plans).toEqual(['azur.accounting_tray']); expect(migrated.collectorCharge).toBe(9);
+    old.plans = ['azur.accounting_tray']; old.walletCents -= 1500; old.stats.upgradeExpenses += 1500;
+    const migrated = parseSnapshot(JSON.stringify(old));
+    expect(migrated.plans).toEqual([]); expect(migrated.upgrades).toContain('azur.accounting_tray');
+    expect(migrated.walletCents).toBe(old.walletCents); expect(migrated.stats.upgradeExpenses).toBe(old.stats.upgradeExpenses); expect(migrated.collectorCharge).toBe(9);
     expect(migrated.pendingBalls[0]).toEqual(ball); const paid = reconcile(migrated).state;
     expect(paid.walletCents).toBe(migrated.walletCents + ball.returnCents); expect(paid.collectorCharge).toBe(10);
     const normal = new Game(paid, () => {}); normal.writable = true; normal.advance(10000);
     expect(normal.magnetsAvailable).toBe(false); expect(normal.collectorAvailable).toBe(false); expect(normal.state.pendingBalls).toEqual([]); expect(normal.state.collectorCharge).toBe(10);
     expect(reconcile(paid).state.walletCents).toBe(paid.walletCents);
   });
-  it('valide les nouveaux identifiants, leur prix et la dépendance au Doigt dans le format 6', () => {
+  it('valide identifiants, prix et dépendance au Doigt ; installe les plans payés d’un ancien format 6', () => {
     const { game } = atelier(); game.state.walletCents += 40000; game.state.stats.factoryIncome += 40000;
     game.buyPlan('azur.magnets'); game.buyPlan('azur.collector'); const raw = JSON.stringify(game.state);
     expect(parseSnapshot(raw)).toEqual(game.state);
     for (const version of [1, 2, 3, 4, 5, 7]) { const bad = JSON.parse(raw); bad.saveVersion = version; expect(() => parseSnapshot(JSON.stringify(bad))).toThrow(); }
-    const noFinger = JSON.parse(raw); noFinger.upgrades = ['azur.initial_repair']; expect(() => parseSnapshot(JSON.stringify(noFinger))).toThrow('Doigt');
+    const noFinger = JSON.parse(raw); noFinger.upgrades = ['azur.initial_repair', 'azur.magnets', 'azur.collector']; expect(() => parseSnapshot(JSON.stringify(noFinger))).toThrow('Doigt');
     const wrongPrice = JSON.parse(raw); wrongPrice.walletCents++; wrongPrice.stats.upgradeExpenses--; expect(() => parseSnapshot(JSON.stringify(wrongPrice))).toThrow('dépenses');
-    const duplicate = JSON.parse(raw); duplicate.upgrades.push('azur.collector'); expect(() => parseSnapshot(JSON.stringify(duplicate))).toThrow('plans');
+    const duplicate = JSON.parse(raw); duplicate.plans = ['azur.collector']; expect(() => parseSnapshot(JSON.stringify(duplicate))).toThrow('plans');
+    const pending = JSON.parse(raw); pending.upgrades = pending.upgrades.filter((id: string) => id !== 'azur.magnets'); pending.plans = ['azur.magnets'];
+    const installed = parseSnapshot(JSON.stringify(pending));
+    expect(installed.plans).toEqual([]); expect(installed.upgrades).toContain('azur.magnets'); expect(installed.walletCents).toBe(game.state.walletCents);
   });
-  it('paie chaque plan une fois, puis installe sans débit ni activation anticipée', () => {
+  it('paie chaque amélioration une fois et l’installe immédiatement', () => {
     const { game } = setup(() => 0.999);
     for (let i = 0; i < 2; i++) { game.settle(game.launch()!.id); game.advance(500); }
     const wallet = game.state.walletCents;
-    expect(game.installPlan('azur.initial_repair')).toBe(false);
+    expect(game.buyPlan('azur.auto_launcher')).toBe(false);
     expect(game.buyPlan('azur.initial_repair')).toBe(true);
-    expect(game.state.walletCents).toBe(wallet - 2500); expect(game.state.repairPurchased).toBe(false);
-    expect(game.state.upgrades).toEqual([]); expect(game.state.plans).toEqual(['azur.initial_repair']);
-    expect(game.buyPlan('azur.initial_repair')).toBe(false); expect(game.buyPlan('azur.auto_launcher')).toBe(false);
+    expect(game.state.walletCents).toBe(wallet - 2500); expect(game.state.repairPurchased).toBe(true);
+    expect(game.state.upgrades).toEqual(['azur.initial_repair']); expect(game.state.plans).toEqual([]);
+    expect(game.buyPlan('azur.initial_repair')).toBe(false); expect(game.state.walletCents).toBe(wallet - 2500);
     expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state);
-    expect(game.installPlan('azur.initial_repair')).toBe(true); expect(game.state.repairPurchased).toBe(true);
-    expect(game.state.walletCents).toBe(wallet - 2500); expect(game.installPlan('azur.initial_repair')).toBe(false);
-    expect(game.buyPlan('azur.auto_launcher')).toBe(true); expect(game.toggleAuto()).toBe(false);
-    const paid = game.state.walletCents;
+    expect(game.buyPlan('azur.auto_launcher')).toBe(true); expect(game.toggleAuto()).toBe(true);
     const resumed = new Game(parseSnapshot(JSON.stringify(game.state)), () => {}); resumed.writable = true;
-    expect(resumed.state.plans).toEqual(['azur.auto_launcher']); expect(resumed.installPlan('azur.auto_launcher')).toBe(true);
-    expect(resumed.state.walletCents).toBe(paid); expect(resumed.state.plans).toEqual([]); expect(resumed.toggleAuto()).toBe(true);
-    expect(parseSnapshot(JSON.stringify(resumed.state))).toEqual(resumed.state);
+    expect(resumed.state.upgrades).toContain('azur.auto_launcher'); expect(resumed.state.walletCents).toBe(game.state.walletCents); expect(resumed.toggleAuto()).toBe(true);
   });
-  it('ne monte pas une réparation sur les billes en cours et conserve le plan', () => {
+  it('ne vend pas la réparation tant que des billes sont en vol, sans débit', () => {
     const { game } = setup(() => 0.999);
     const a = game.launch()!; game.advance(500); const b = game.launch()!; game.advance(500); const c = game.launch()!;
-    game.settle(a.id); game.settle(b.id); expect(game.buyPlan('azur.initial_repair')).toBe(true);
-    const before = structuredClone(game.state); expect(game.installPlan('azur.initial_repair')).toBe(false); expect(game.state).toEqual(before);
-    game.settle(c.id); expect(game.installPlan('azur.initial_repair')).toBe(true);
+    game.settle(a.id); game.settle(b.id);
+    const before = structuredClone(game.state); expect(game.buyPlan('azur.initial_repair')).toBe(false); expect(game.state).toEqual(before); expect(game.notice).toContain('billes');
+    game.settle(c.id); expect(game.buyPlan('azur.initial_repair')).toBe(true); expect(game.state.repairPurchased).toBe(true);
   });
-  it('annule achat ou montage en cas d’erreur d’écriture, sans perdre ni doubler le plan', () => {
+  it('annule l’achat en cas d’erreur d’écriture, sans perdre ni doubler le paiement', () => {
     const context = setup(() => 0.999), { game } = context;
     for (let i = 0; i < 2; i++) { game.settle(game.launch()!.id); game.advance(500); }
     const before = structuredClone(game.state); context.fail(true);
-    expect(game.buyPlan('azur.initial_repair')).toBe(false); expect(game.state).toEqual(before);
-    context.fail(false); game.retrySave(); game.buyPlan('azur.initial_repair'); const paid = structuredClone(game.state);
-    context.fail(true); expect(game.installPlan('azur.initial_repair')).toBe(false); expect(game.state).toEqual(paid);
-    context.fail(false); game.retrySave(); expect(game.installPlan('azur.initial_repair')).toBe(true);
-    expect(game.state.walletCents).toBe(paid.walletCents); expect(game.state.stats.upgradeExpenses).toBe(2500);
+    expect(game.buyPlan('azur.initial_repair')).toBe(false); expect(game.state).toEqual(before); expect(game.state.repairPurchased).toBe(false);
+    context.fail(false); game.retrySave(); expect(game.buyPlan('azur.initial_repair')).toBe(true);
+    expect(game.state.walletCents).toBe(before.walletCents - 2500); expect(game.state.stats.upgradeExpenses).toBe(2500);
+  });
+  it('départ par l’escalier : règle les billes en vol une seule fois, au retour figé, ou rien si l’écriture échoue', () => {
+    const context = atelier(), { game } = context;
+    game.toggleAuto(); game.advance(2000); const manual = game.launch()!;
+    const flying = structuredClone(game.state.pendingBalls); expect(flying.length).toBe(2);
+    const expected = game.state.walletCents + flying.reduce((sum, ball) => sum + ball.returnCents, 0);
+    game.stopAuto(); const before = structuredClone(game.state); context.fail(true);
+    expect(game.settleAll()).toBe(false); expect(game.state).toEqual(before);
+    context.fail(false); game.retrySave();
+    expect(game.settleAll()).toBe(true); expect(game.state.pendingBalls).toEqual([]); expect(game.state.walletCents).toBe(expected);
+    expect(game.state.history.slice(0, 2).map(r => r.id).sort()).toEqual(flying.map(b => b.id).sort()); expect(game.settle(manual.id)).toBeUndefined();
+    expect(game.settleAll()).toBe(true); expect(game.state.walletCents).toBe(expected);
   });
   it('migre les modules déjà installés du format 4 sans achat ni démontage', () => {
     const { game } = atelier(() => 0.999, true, true); game.state.collectorCharge = 7;
@@ -165,7 +173,7 @@ describe('Règles économiques et transactions', () => {
       expect(() => parseSnapshot(JSON.stringify({ ...JSON.parse(raw), plans }))).toThrow();
     }
     const premature = newGame(); premature.plans = ['azur.initial_repair']; expect(() => parseSnapshot(JSON.stringify(premature))).toThrow();
-    expect(game.buyPlan('azur.unknown' as UpgradeId)).toBe(false); expect(game.installPlan('azur.unknown' as UpgradeId)).toBe(false);
+    expect(game.buyPlan('azur.unknown' as UpgradeId)).toBe(false);
   });
   it('démarre à 19,00 et conserve les fractions : mise 10, x0,3, net -7', () => {
     const { game } = setup();

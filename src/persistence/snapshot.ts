@@ -3,6 +3,7 @@ import type { UpgradeId } from '../config';
 import type { Ball, GameState } from '../game/state';
 import { factoryClock, factorySpawnTime, newFactory } from '../game/packing';
 import type { FactoryEvent } from '../game/packing';
+import { installPaidPlans } from '../game/plans';
 import { FACTORY_EVENTS } from '../config';
 
 function requireValid(condition: unknown, message: string): asserts condition {
@@ -125,7 +126,9 @@ export function parseSnapshot(raw: string): GameState {
   requireValid(s.history.reduce((sum, ball) => sum + ball.returnCents, 0) <= s.stats.grossReturns, 'retours de l’historique.');
   requireValid(object(value.preferences) && typeof value.preferences.sound === 'boolean' && typeof value.preferences.reducedMotion === 'boolean' && ['normal', 'low'].includes(value.preferences.quality as string), 'préférences.');
   requireValid(typeof value.savedAt === 'string' && value.savedAt.length <= 40 && Number.isFinite(Date.parse(value.savedAt)), 'date.');
-  return structuredClone(s);
+  const migrated = structuredClone(s);
+  installPaidPlans(migrated);
+  return migrated;
 }
 
 export function writeSnapshot(state: GameState): void {

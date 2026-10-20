@@ -1,6 +1,5 @@
 import './style.css';
-import { CONFIG, UPGRADES, VIEWS } from './config';
-import type { UpgradeId } from './config';
+import { CONFIG, VIEWS } from './config';
 import { Game, reconcile } from './game/engine';
 import { newGame } from './game/state';
 import type { GameState } from './game/state';
@@ -33,7 +32,7 @@ let awaitingDelete = false;
 let importing = false, importGeneration = 0;
 let acquired = false, waiting = false;
 let loaded = false;
-let historyPage = 0, installationPage = 0;
+let historyPage = 0;
 const sound = new Sound();
 const navigation = new Navigation();
 const departure = new Departure();
@@ -61,9 +60,7 @@ function leaveCave() {
   if (!departure.inCave || navigation.moving || awaitingImport || importing || awaitingDelete || !scene) return;
   if (navigation.target !== 'plinko') { navigate('plinko'); return; }
   if (!game.writable || game.error || bootProblem || document.hidden) return;
-  if (game.state.pendingBalls.length) {
-    message = 'Attendez l’arrivée des billes avant de sortir. Arrêtez le Doigt mécanique s’il est actif.'; render(); return;
-  }
+  // Le Doigt s’arrête de lui-même ; les billes en vol finissent leur chute pendant la montée.
   game.stopAuto();
   if (departure.begin(scene.cameraPose(), game.state.preferences.reducedMotion)) { message = ''; scene.clearFocus(); render(); }
 }
@@ -85,13 +82,13 @@ function navigate(view: View) {
   if (!departure.inCave) return;
   if (awaitingDelete && view !== 'reglages') { message = 'Confirmez ou annulez la suppression sur le boîtier.'; render(); return; }
   if ((awaitingImport || importing) && view !== 'reglages') { message = 'Terminez ou annulez l’import sur le boîtier.'; return; }
-  if (view === 'historique' && !game.state.upgrades.includes('azur.accounting_tray')) { message = 'Achetez le plan du Bac comptable chez Azur, puis installez-le sur le Plinko.'; return; }
+  if (view === 'historique' && !game.state.upgrades.includes('azur.accounting_tray')) { message = 'Le Bac comptable s’achète chez Azur ; il est installé dès l’achat.'; return; }
   if (view === 'collecteur' && !game.collectorAvailable) return;
-  if (view === 'montage' && navigation.target !== 'montage') installationPage = Math.max(0, Math.floor(Object.keys(UPGRADES).indexOf(game.state.plans[0]) / 3));
   scene?.clearFocus();
   navigation.go(view, game.state.preferences.reducedMotion); render();
 }
-try { scene = new PlinkoScene(element, navigation, action, variant => sound.contact(variant, game.state.preferences.sound)); }
+// Aucune image avant la préparation des shaders (scene.prepare après lecture de la sauvegarde).
+try { scene = new PlinkoScene(element, navigation, action, variant => sound.contact(variant, game.state.preferences.sound), true); }
 catch (error) {
   console.error(error);
   renderingError = 'Le rendu 3D est indisponible. Activez l’accélération graphique du navigateur, puis rechargez la page.';
@@ -108,22 +105,24 @@ async function load() {
     next.writable = true;
     if (!next.retrySave()) throw new Error(next.error);
     game = next; bootProblem = ''; invalidRaw = ''; message = '';
+    scene?.prepare(game.state.preferences.quality);
     resumeLocation();
     if (resume.count) game.notice = `Reprise : ${resume.count} bille(s) réglée(s), +${money(resume.total)} pièces.`;
     else if (raw !== null) game.notice = 'Le Doigt mécanique attend votre commande.';
   } catch (error) {
     bootProblem = error instanceof Error ? error.message : 'Lecture de la sauvegarde impossible.';
     game.writable = false; navigation.go('reglages', true);
+    scene?.prepare(game.state.preferences.quality);
   }
   loaded = true; render();
 }
 void claimWriter(async () => { acquired = true; await load(); }, () => {
-  waiting = true; game.writable = false; navigation.go('reglages', true); render();
-}).catch(error => { bootProblem = error.message; navigation.go('reglages', true); render(); });
+  waiting = true; game.writable = false; navigation.go('reglages', true); scene?.prepare(game.state.preferences.quality); render();
+}).catch(error => { bootProblem = error.message; navigation.go('reglages', true); scene?.prepare(game.state.preferences.quality); render(); });
 
 function render() {
   const info = awaitingDelete ? game.error || message || 'Supprimer la sauvegarde ? La progression sera effacée. Confirmez ou annulez sur le boîtier.' : awaitingImport ? `Fichier validé : ${money(awaitingImport.walletCents)} pièces. Remplacer la partie ? Confirmer ou annuler sur le boîtier.` : waiting ? 'Partie déjà ouverte ailleurs. Fermez l’autre onglet pour jouer ici.' : bootProblem ? message || `${bootProblem} Données conservées. Exportez-les ou importez un fichier valide.` : game.error || message || game.notice;
-  scene?.setInterface({ canWrite: game.writable && !game.error && !bootProblem && !renderingError, canManageSave: acquired && !waiting, recovery: !!(bootProblem || game.error), confirmDelete: awaitingDelete, importing, autoEnabled: game.autoEnabled, magnetsAvailable: game.magnetsAvailable, collectorAvailable: game.collectorAvailable, message: info, historyPage, installationPage, importWallet: awaitingImport?.walletCents });
+  scene?.setInterface({ canWrite: game.writable && !game.error && !bootProblem && !renderingError, canManageSave: acquired && !waiting, recovery: !!(bootProblem || game.error), confirmDelete: awaitingDelete, importing, autoEnabled: game.autoEnabled, magnetsAvailable: game.magnetsAvailable, collectorAvailable: game.collectorAvailable, message: info, historyPage, importWallet: awaitingImport?.walletCents });
   document.getElementById('app')!.dataset.view = navigation.target;
   document.getElementById('app')!.dataset.moving = String(navigation.moving);
   document.getElementById('app')!.dataset.departure = departure.phase;
@@ -154,12 +153,14 @@ function render() {
   if (shopping && !shop && !shopLoading) {
     shopLoading = true;
     void import('./rendering/shop').then(({ AzurShop }) => {
-      shop = new AzurShop(document.getElementById('shop-scene')!, text => { document.getElementById('shop-status')!.textContent = text; }, () => {
-        departure.finishVisit(); message = ''; render();
+      shop = new AzurShop(document.getElementById('shop-scene')!, text => { document.getElementById('shop-status')!.textContent = text; }, home => {
+        departure.finishVisit(); message = '';
+        // Depuis l’atelier : retour direct à la cave, sans repasser par la boutique ni la liste.
+        if (home) returnToCave(); else render();
       }, id => {
         if (departure.phase !== 'shop' || document.hidden || bootProblem) return false;
         const bought = game.buyPlan(id);
-        if (bought) { sound.unlock(); sound.play('purchase', game.state.preferences.sound); }
+        if (bought) { sound.unlock(game.state.preferences.sound); sound.play('purchase', game.state.preferences.sound); }
         render(); return bought;
       });
       shop.reset();
@@ -197,7 +198,6 @@ function action(command: string) {
   message = '';
   if (command === 'history-prev') historyPage = Math.max(0, historyPage - 1);
   else if (command === 'history-next') historyPage = Math.min(Math.max(0, Math.ceil(game.state.history.length / 7) - 1), historyPage + 1);
-  else if (['montage-prev', 'montage-next'].includes(command) && navigation.target === 'montage' && !navigation.moving) installationPage = Math.max(0, Math.min(Math.ceil(Object.keys(UPGRADES).length / 3) - 1, installationPage + (command === 'montage-next' ? 1 : -1)));
   else if (command === 'export') exportSave();
   else if (command === 'delete-save' && acquired && !waiting && !importing && !awaitingImport && !navigation.moving && navigation.target === 'reglages') awaitingDelete = true;
   else if (command === 'cancel-delete') { awaitingDelete = false; message = 'Suppression annulée. Partie actuelle conservée.'; }
@@ -220,19 +220,15 @@ function action(command: string) {
   } else if (command === 'retry' && acquired && (bootProblem || game.error)) { if (bootProblem) void load(); else if (game.retrySave()) message = 'Sauvegarde écrite. Vous pouvez reprendre.'; }
   else if (!bootProblem && game.writable && !game.error && !awaitingImport) {
     const s = game.state;
-    if (command === 'sound') game.setPreferences({ sound: !s.preferences.sound });
+    if (command === 'sound') { game.setPreferences({ sound: !s.preferences.sound }); sound.unlock(game.state.preferences.sound); }
     else if (command === 'motion') game.setPreferences({ reducedMotion: !s.preferences.reducedMotion });
     else if (command === 'quality') game.setPreferences({ quality: s.preferences.quality === 'normal' ? 'low' : 'normal' });
     else if (command === 'launch' && navigation.atMachine) {
-      sound.unlock(); if (game.launch()) sound.play('launch', s.preferences.sound);
+      sound.unlock(s.preferences.sound); if (game.launch()) sound.play('launch', s.preferences.sound);
     } else if (command === 'bet-down' || command === 'bet-up') {
       if (navigation.atMachine && !s.factoryRemainingMs) game.setBet(s.selectedBetCents + (command === 'bet-up' ? 100 : -100));
     } else if (command === 'auto' && navigation.atMachine) game.toggleAuto();
     else if (command === 'discharge' && navigation.atMachine) game.activateBonus();
-    else if (command.startsWith('install:') && navigation.target === 'montage' && !navigation.moving) {
-      const id = command.slice(8) as UpgradeId;
-      if (Object.hasOwn(UPGRADES, id) && Math.floor(Object.keys(UPGRADES).indexOf(id) / 3) === installationPage && game.installPlan(id)) { sound.unlock(); sound.play('purchase', s.preferences.sound); }
-    }
   }
   scene?.clearFocus();
   render();
@@ -289,11 +285,18 @@ function frame(now: number) {
   }
   // Les trajets restent utilisables pour rejoindre le boîtier après une erreur d’écriture.
   departure.advance(delta, !document.hidden && !renderingError);
+  // Arrivée en haut : les billes encore en vol sont réglées avec leur retour figé, sans nouveau hasard.
+  if (before === 'ascending' && departure.phase === 'destinations' && game.state.pendingBalls.length) {
+    if (game.settleAll()) scene?.resetFlights(); else message = game.error;
+  }
   render();
   if (before === 'descending' && departure.inCave) element.querySelector('canvas')?.focus({ preventScroll: true });
   if (!document.hidden && departure.phase === 'working') factory?.frame(game.state, delta, game.state.preferences.reducedMotion, available);
-  if (!document.hidden && departure.phase === 'shop') shop?.frame(delta);
-  if (!document.hidden && !departure.opaque) scene?.frame(game.state, delta, active, id => {
+  // Une image lente ne doit jamais sauter une étape visible (porte, étagère, page) : pas plafonné.
+  if (!document.hidden && departure.phase === 'shop') shop?.frame(Math.min(delta, 50));
+  // Pendant la montée, seules les billes déjà lancées continuent leur chute ; aucun lancement n’a lieu.
+  const flying = active || (available && departure.phase === 'ascending');
+  if (!document.hidden && !departure.opaque) scene?.frame(game.state, delta, flying, id => {
     const result = game.settle(id); if (result) sound.play('result', game.state.preferences.sound); return !!result;
   });
   requestAnimationFrame(frame);

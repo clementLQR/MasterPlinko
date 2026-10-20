@@ -62,7 +62,6 @@ export function atWorkbench(x: number, y: number, z: number) {
 export const VIEWS = {
   plinko: { x: 0.4, y: -0.05, z: 0, width: 44, height: 23.5, offsetX: 0.2, offsetY: 1.05, yaw: 0 },
   commandes: { x: 0, y: -5.1, z: 1, width: 12.8, height: 5.8, offsetX: 0, offsetY: 0.6, yaw: 0 },
-  montage: { x: -6.65, y: -4.65, z: 1, width: 4.8, height: 5.4, offsetX: 2.2, offsetY: 0.4, yaw: 0 },
   collecteur: { x: 6.4, y: 0.6, z: 0.8, width: 4.1, height: 5.6, offsetX: 0, offsetY: 0.5, yaw: 0 },
   azur: { ...atWorkbench(11.2, -0.2, 0.2), width: 23, height: 17.6, offsetX: 0, offsetY: 1.2, yaw: WORKBENCH.yaw },
   reglages: { x: -7.15, y: 0, z: 1.5, width: 4, height: 5.4, offsetX: 0, offsetY: 0, yaw: 0 },

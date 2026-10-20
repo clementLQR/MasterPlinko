@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { CAVE } from '../config';
+import { CAVE, STAIRS } from '../config';
 
 const FLOOR = CAVE.floorY;
 const random = (n: number) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
@@ -484,9 +484,10 @@ export class CaveDecor {
       });
     }
     // Boîtier et conduit électrique distincts des écrans de jeu.
+    // Il part du flanc extérieur de la cage d’escalier (x = -16,29) : rien ne dépasse dans la montée.
     for (const y of [7.7, 8.15]) {
-      this.rod(this.root, [-18.5, y, -1.25], [17.8, y, -1.25], 0.055, this.iron);
-      for (let i = 0; i < 10; i++) this.box(this.root, 0.12, 0.23, 0.12, -18 + i * 4, y, -1.22, this.brass);
+      this.rod(this.root, [STAIRS.x + 2.71, y, -1.25], [17.8, y, -1.25], 0.055, this.iron);
+      for (let i = 0; i < 8; i++) this.box(this.root, 0.12, 0.23, 0.12, -14 + i * 4, y, -1.22, this.brass);
     }
   }
   private lighting() {
@@ -496,10 +497,12 @@ export class CaveDecor {
     this.ball(pendant, 0.22, 0, 0, 0, this.amber).scale.y = 1.35;
     for (const y of [-0.4, 0.4]) this.ring(pendant, 0.4, 0.025, 0, y, 0, this.brass).rotation.x = Math.PI / 2;
     for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; this.rod(pendant, [Math.sin(a) * 0.4, -0.4, Math.cos(a) * 0.4], [Math.sin(a) * 0.4, 0.4, Math.cos(a) * 0.4], 0.02, this.brass); }
-    const curve = new THREE.CatmullRomCurve3(Array.from({ length: 25 }, (_, i) => new THREE.Vector3(-18 + i * 1.5, 8 - Math.sin(i / 24 * Math.PI) * 0.8, -0.8)));
+    // La guirlande part du flanc extérieur de la cage d’escalier (x = -16,29) : rien ne traverse le coffrage.
+    const start = -16.1, span = 34.1;
+    const curve = new THREE.CatmullRomCurve3(Array.from({ length: 25 }, (_, i) => new THREE.Vector3(start + i * span / 24, 8 - Math.sin(i / 24 * Math.PI) * 0.8, -0.8)));
     this.mesh(this.root, new THREE.TubeGeometry(curve, 50, 0.022, 5, false), this.iron, 0, 0, 0);
-    for (let i = 0; i < 18; i++) {
-      const x = -17.5 + i * 2, y = 8 - Math.sin((x + 18) / 36 * Math.PI) * 0.8;
+    for (let i = 0; i < 17; i++) {
+      const x = -15.5 + i * 2, y = 8 - Math.sin((x - start) / span * Math.PI) * 0.8;
       this.cylinder(this.root, 0.055, 0.17, x, y - 0.1, -0.8, this.iron);
       this.ball(this.root, 0.09, x, y - 0.28, -0.8, this.amber).scale.y = 1.3;
     }
@@ -877,8 +880,10 @@ const surfaceUrls = {
   pierre: new URL('../assets/textures/pierre.webp', import.meta.url).href,
   tapis: new URL('../assets/textures/tapis.webp', import.meta.url).href,
 };
-export function finishSurface(name: keyof typeof surfaceUrls, materials: THREE.MeshStandardMaterial[]) {
-  new THREE.TextureLoader().load(surfaceUrls[name], map => {
+/** Chargements de textures en cours : une scène peut attendre leur fin pour précompiler ses shaders. */
+export const surfaceLoads = new Set<Promise<void>>();
+export function finishSurface(name: keyof typeof surfaceUrls, materials: THREE.MeshStandardMaterial[]): Promise<void> {
+  const loading = new Promise<void>(resolve => new THREE.TextureLoader().load(surfaceUrls[name], map => {
     map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 8;
     const previous = new Set<THREE.Texture>();
     for (const material of materials) {
@@ -886,7 +891,10 @@ export function finishSurface(name: keyof typeof surfaceUrls, materials: THREE.M
       material.map = map; material.bumpMap = map; material.needsUpdate = true;
     }
     previous.forEach(texture => texture.dispose());
-  });
+    resolve();
+  }, undefined, () => resolve()));
+  surfaceLoads.add(loading); void loading.then(() => surfaceLoads.delete(loading));
+  return loading;
 }
 
 export function wovenRug() {

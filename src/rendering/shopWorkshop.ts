@@ -290,6 +290,11 @@ export class AzurWorkshop {
     b.plaque(back, 0.74, 0.28, 0, 0, 0, ['BOUTIQUE ↶']);
     b.rod(this.workshop, [2.9, 2.49, -18.03], [2.9, 3.38, -18.03], 0.012, this.iron);
     b.register(back, 'return-shop', 'Retourner dans la boutique — trajet automatique', [2.9, 2.65, -17.8], allLab);
+    // Seconde plaque suspendue sous la première : retour direct à la cave, sans repasser par la boutique.
+    const home = b.group(2.9, 1.9, -18, this.workshop);
+    b.plaque(home, 0.74, 0.28, 0, 0, 0, ['MAISON ↶']);
+    b.rod(this.workshop, [2.9, 2.04, -18.03], [2.9, 2.16, -18.03], 0.012, this.iron);
+    b.register(home, 'go-home', 'Rentrer à la cave — retour direct', [2.9, 1.6, -17.8], allLab);
   }
   private finger(parent: THREE.Object3D) {
     const b = this.b, g = b.group(-0.6, 1.12, 0.02, parent); g.name = 'azur:prototype:finger';
