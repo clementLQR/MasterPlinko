@@ -15,9 +15,10 @@
 | Premières améliorations | Réparation initiale, Doigt mécanique, Bac comptable |
 | Aimants | Prix fixé par le créateur : **200 pièces**, plan dans le carnet privé d’Azur. Réparation et Doigt installés requis ; installé dès l’achat. Recharge 5 secondes puis prochaine bille automatique, une seule case vers un voisin supérieur ; ×40 et manuelles inchangés, ×40 conserve l’activation. Module installé actif en jeu normal et en production ; essai DEV facultatif conservé. Détails fichier 05 |
 | Collecteur de ratés | Prix fixé par le créateur : **120 pièces**, dans le carnet privé, installé dès l’achat. Réparation requise, sans exiger le Doigt. Dix sorties sous ×1 de manuelles/Doigt offrent une bille gratuite de base 1, exclue de son propre remplissage. Une réserve attend au plafond ; actif en jeu normal/production une fois installé. Détails fichier 05 |
-| Amélioration future : Condensateur de poche | Concept retenu : stocker une deuxième charge de Décharge pour l’utiliser plus tard. Aucun nouveau facteur ni cumul de bonus confirmé, non implémenté |
-| Amélioration future : Boîte de vitesses | Concept retenu : Doigt régulier ou par petites rafales, à production moyenne identique. Cadences précises à définir, non implémenté |
-| Module numérique | Prévoir un module donnant accès aux améliorations téléchargeables installables sur le Plinko. Branche logicielle future, liste et effets à concevoir ; non implémenté, suivi MP-044 |
+| Condensateur de poche | Décision du créateur (20 octobre 2026) : 150 pièces après réparation, deux charges stockées, une par activation, aucun cumul ni comptage pendant le bonus, facteur ×2 inchangé. Implémenté (MP-041) |
+| Boîte de vitesses | Décision du créateur (20 octobre 2026) : 100 pièces avec le Doigt, levier régulier (1 bille / 2 s) ou rafale (3 billes à 0,25 s toutes les 6 s), refus au plafond sans file, mode sauvegardé. Implémentée (MP-042) |
+| Module numérique | Décision du créateur (20 octobre 2026) : offert au premier recalibrage ; téléchargements achetés depuis son écran dans la cave (exception explicite), instantanés et permanents : Mémoire de mise 30, Décharge auto 60, Aimants 2.0 120, Surchauffe rapide 150 pièces. Implémenté (MP-044) |
+| Duplicateur et recalibrage | Décision du créateur (20 octobre 2026) : Duplicateur 300 pièces après réparation, double 1 bille sur 20 finissant sur ×1,5 ou plus (tirage au lancement) et ouvre une faille ; Compteur d’instabilité plein à 1 000 pièces de retours bruts ; recalibrage : solde à 19, améliorations retirées sauf réparation (Duplicateur compris), conservation de l’historique, des réglages et des téléchargements, module numérique offert au premier ; pas d’Échos pour l’instant |
 | Famille des billes spéciales | Le Ressort de deuxième chance est un type de bille spéciale. Second passage possible ; premier passage non payé, seul le résultat final compte. Ce n’est pas une amélioration de machine ; obtention et déclenchement à définir, non implémenté |
 | Capacité | 50 billes simultanées |
 | Développement | GitHub : https://github.com/clementLQR/MasterPlinko.git ; essai localhost ; aucun commit ni push sans demande explicite |
@@ -80,20 +81,18 @@ La bibliothèque physique Rapier était dans la stack envisagée. Le résultat p
 - Équilibrage à long terme et durées des chapitres.
 
 ## À définir pour les fonctionnalités futures
-- Module numérique : forme et emplacement du support 3D, prix et déblocage ; liste des améliorations téléchargeables, effets, coûts, prérequis, installation, niveaux éventuels et règles de cumul avec les modules physiques ; habillage du téléchargement et contrat de sauvegarde. Aucun serveur ou compte ajouté au périmètre local actuel.
+- Module numérique : téléchargements supplémentaires éventuels et habillage plus riche du téléchargement.
 - Aimants : évaluer le rythme en session utilisateur et ajuster éventuellement la recharge. Prix **200 pièces** et acquisition normale désormais fixés ; conserver les effets confirmés.
 - Collecteur de ratés : évaluer le rythme réel et ses interactions en session utilisateur. Prix **120 pièces** et acquisition normale désormais fixés ; seuil de dix, réserve unique et exclusion des billes offertes conservés.
-- Condensateur de poche : prix et déblocage, règles de recharge avec une charge déjà stockée ou un bonus actif, activation de la seconde charge, persistance et migration ; aucune hausse du facteur ni cumul de bonus décidé.
-- Boîte de vitesses : prix et déblocage, taille et intervalle des rafales à production moyenne identique, changement de mode, arrêt/reprise, capacité et lancements refusés sans accumulation de file ; interaction avec la Décharge.
 - Bille spéciale « Ressort de deuxième chance » : obtention et fréquence, conditions et taux du second passage, mise/base, occupation de la capacité, comptage pour la Surchauffe et interactions avec les aimants ; animation du retour et contrat de sauvegarde à paiement final unique.
 - Dialogues et futurs systèmes associés aux prototypes privés d’Azur ; la visite des lieux ne les acquiert pas et n’ajoute aucune mécanique.
-- Duplicateur, résidus et fréquence des objets.
+- Résidus et fréquence des objets (le Duplicateur lui-même est défini).
 - Produits, cumuls et interactions.
 - Porte-bonheur et nombre d'emplacements.
 - Trois plateaux et profils de rendement.
 - Déclencheur du chapitre 4.
 - Destruction, reconstruction et compensations.
-- Recalibrage : pertes, conservation et formule d'Échos.
+- Recalibrage : Échos, permanents et lien avec l’histoire (la première version est définie).
 - Très grands nombres.
 - Production hors ligne éventuelle.
 - Combat de Paul et option simplifiée.

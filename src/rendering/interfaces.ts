@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { CONFIG } from '../config';
-import { isBroken } from '../game/state';
+import { chargeCapacity, isBroken } from '../game/state';
 import type { GameState } from '../game/state';
 import type { View } from '../navigation/camera';
 
 export type InterfaceState = {
   canWrite: boolean; canManageSave?: boolean; recovery?: boolean; confirmDelete?: boolean; importing?: boolean; autoEnabled: boolean; message: string;
-  historyPage: number; importWallet?: number; magnetsAvailable?: boolean; collectorAvailable?: boolean;
+  historyPage: number; downloadPage?: number; confirmRecalibration?: boolean; importWallet?: number; magnetsAvailable?: boolean; collectorAvailable?: boolean;
 };
 export type Register = (object: THREE.Object3D, action: string, label: () => string, views?: View[]) => void;
 const money = (n: number) => (n / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -89,7 +89,7 @@ export class DiegeticInterface {
     this.discharge = box(machine, 0.62, 0.62, 0.3, -4.96, -5.73, 1.18, '#be8b8e');
     const dischargeLabel = new Page(machine, 0.5, 0.36, -4.96, -5.73, 1.34, register); dischargeLabel.draw('label', '#be8b8e', c => text(c, `×${CONFIG.bonusFactor}`, 60, 40, 400));
     dischargeLabel.mesh.userData.control = this.discharge;
-    register(this.discharge, 'discharge', () => this.state?.factoryRemainingMs ? 'Décharge indisponible pendant le service' : this.state?.bonusRemainingMs ? `Décharge ×${CONFIG.bonusFactor} — ${(this.state.bonusRemainingMs / 1000).toFixed(1)} s restantes` : this.state?.chargeReady ? `Activer la Décharge — retours ×${CONFIG.bonusFactor} pendant 10 s` : `Surchauffe — ${this.state?.heatCount ?? 0}/100 billes`, controls);
+    register(this.discharge, 'discharge', () => this.state?.factoryRemainingMs ? 'Décharge indisponible pendant le service' : this.state?.bonusRemainingMs ? `Décharge ×${CONFIG.bonusFactor} — ${(this.state.bonusRemainingMs / 1000).toFixed(1)} s restantes` : this.state?.charges ? `Activer la Décharge — retours ×${CONFIG.bonusFactor} pendant 10 s${this.state.charges > 1 ? ' · 2 charges en réserve' : ''}` : `Surchauffe — ${this.state?.heatCount ?? 0}/100 billes`, controls);
     register(this.bet.mesh, 'commandes', () => 'Modifier la mise — rapprocher les commandes', ['plinko']);
     register(this.result.mesh, 'commandes', () => 'Lire le dernier résultat et les commandes', ['plinko']);
     register(this.heat.mesh, 'commandes', () => this.state?.bonusRemainingMs ? `Décharge ×${CONFIG.bonusFactor} — ${(this.state.bonusRemainingMs / 1000).toFixed(1)} s` : 'Surchauffe — une charge après 100 règlements', controls);
@@ -136,10 +136,13 @@ export class DiegeticInterface {
     this.result.draw(JSON.stringify(result ?? null), '#213930', c => text(c, result ? `DERNIER : ${originLabel(result.origin)}${result.magnetFrom !== undefined ? ' AIMANT' : ''}  ${multi(result.multiplier)}${result.bonus > 1 ? ` · BONUS ×${result.bonus}` : ''}  RETOUR ${money(result.returnCents)}  NET ${result.netCents >= 0 ? '+' : ''}${money(result.netCents)}` : 'DERNIER RÉSULTAT : AUCUNE BILLE RÉGLÉE', 15, 7, 27, '#cbe1af', 970));
     const status = !ui.canWrite ? 'PARTIE SUSPENDUE' : s.factoryRemainingMs ? 'SERVICE À L’USINE' : isBroken(s) ? 'PANNE · VOIR AZUR' : 'MACHINE EN SERVICE';
     this.status.draw(status + ui.message + s.pendingBalls.length, '#233a31', c => { text(c, status, 30, 20, 66, '#d2dfad'); text(c, `${s.pendingBalls.length}/50 BILLES`, 30, 100, 49, '#d2dfad'); wrap(c, ui.message, 30, 157, 940, 30, '#d2dfad'); });
-    const heat = s.bonusRemainingMs ? `×${CONFIG.bonusFactor} · ${(s.bonusRemainingMs / 1000).toFixed(1)} s` : s.chargeReady ? 'DÉCHARGE PRÊTE' : `SURCHAUFFE ${s.heatCount}/100`;
-    this.heat.draw(heat, '#233a31', c => { text(c, heat, 35, 35, 80, '#d8d6ae'); text(c, `100 BILLES → ×${CONFIG.bonusFactor} / 10 s`, 35, 165, 47, '#bbc6a0'); });
-    this.segments.forEach((segment, i) => { const material = segment.material as THREE.MeshStandardMaterial, lit = s.chargeReady || s.bonusRemainingMs > 0 || s.heatCount >= (i + 1) * 10; material.color.set(lit ? '#dfba79' : '#585c48'); material.emissive.set(lit ? '#a16527' : '#000000'); material.emissiveIntensity = lit ? 0.65 : 0; });
-    const dischargeMat = this.discharge.material as THREE.MeshStandardMaterial; dischargeMat.emissive.set(s.chargeReady ? '#ffc477' : '#000000'); dischargeMat.emissiveIntensity = s.chargeReady ? 0.8 : 0;
+    const capacity = chargeCapacity(s), full = s.charges === capacity;
+    const heat = s.bonusRemainingMs ? `×${CONFIG.bonusFactor} · ${(s.bonusRemainingMs / 1000).toFixed(1)} s` : s.charges ? `DÉCHARGE PRÊTE${capacity > 1 ? ` ${s.charges}/${capacity}` : ''}` : `SURCHAUFFE ${s.heatCount}/100`;
+    // Avec le Condensateur, la jauge continue vers la charge suivante tant qu’une place reste libre.
+    const detail = capacity > 1 && !full && (s.charges || s.bonusRemainingMs) ? `CHARGE SUIVANTE ${s.heatCount}/100` : `100 BILLES → ×${CONFIG.bonusFactor} / 10 s`;
+    this.heat.draw(heat + detail, '#233a31', c => { text(c, heat, 35, 35, 80, '#d8d6ae'); text(c, detail, 35, 165, 47, '#bbc6a0'); });
+    this.segments.forEach((segment, i) => { const material = segment.material as THREE.MeshStandardMaterial, lit = full || (s.bonusRemainingMs > 0 && capacity === 1) || s.heatCount >= (i + 1) * 10; material.color.set(lit ? '#dfba79' : '#585c48'); material.emissive.set(lit ? '#a16527' : '#000000'); material.emissiveIntensity = lit ? 0.65 : 0; });
+    const dischargeMat = this.discharge.material as THREE.MeshStandardMaterial; dischargeMat.emissive.set(s.charges && !s.bonusRemainingMs ? '#ffc477' : '#000000'); dischargeMat.emissiveIntensity = s.charges && !s.bonusRemainingMs ? 0.8 : 0;
     this.autoSwitch.rotation.x = ui.autoEnabled ? -0.3 : 0.3;
     const autoMat = this.autoLed.material as THREE.MeshStandardMaterial; autoMat.color.set(ui.autoEnabled ? '#c9ebaf' : '#56634f'); autoMat.emissive.set(ui.autoEnabled ? '#8eb86b' : '#000000'); autoMat.emissiveIntensity = ui.autoEnabled ? 1 : 0;
     const prefs = s.preferences;

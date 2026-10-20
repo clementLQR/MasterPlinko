@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STAIRS, CONFIG, EXITS, OUTCOMES } from '../src/config';
+import { STAIRS, CONFIG, EXITS, OUTCOMES, UPGRADES } from '../src/config';
 import { Game, reconcile } from '../src/game/engine';
 import { newGame } from '../src/game/state';
 import type { UpgradeId } from '../src/config';
@@ -27,6 +27,18 @@ function outcomeRandom(multiplier: number) {
     lower += outcome.weight;
   }
   throw new Error('Multiplicateur absent du test.');
+}
+
+/** Ancien snapshot : sans recalibrage avant le format 8 ; une seule charge (`chargeReady`) et sans rythme du Doigt avant le 7. */
+function olderFormat(state: GameState, version: number) {
+  const old = JSON.parse(JSON.stringify(state));
+  old.saveVersion = version;
+  if (version < 8) {
+    delete old.recalibrations; delete old.instabilityBaseCents; delete old.downloads; delete old.preferredBetCents;
+    delete old.stats.recalibrationWithdrawn; delete old.stats.discardedUpgrades; delete old.stats.downloadExpenses;
+  }
+  if (version < 7) { old.chargeReady = old.charges > 0; if (old.chargeReady) old.heatCount = 100; delete old.charges; delete old.gearMode; }
+  return old;
 }
 
 function buyInstalled(game: Game, id: UpgradeId) {
@@ -93,7 +105,7 @@ describe('Règles économiques et transactions', () => {
     game.toggleAuto(); game.state.magnetCooldownMs = 0; sample = 0;
     const ball = game.launch('auto')!; game.state.collectorCharge = 9;
     // Ancien contrat : Bac payé mais pas encore monté.
-    const old = JSON.parse(JSON.stringify(game.state)); old.saveVersion = 5;
+    const old = olderFormat(game.state, 5);
     old.plans = ['azur.accounting_tray']; old.walletCents -= 1500; old.stats.upgradeExpenses += 1500;
     const migrated = parseSnapshot(JSON.stringify(old));
     expect(migrated.plans).toEqual([]); expect(migrated.upgrades).toContain('azur.accounting_tray');
@@ -108,7 +120,7 @@ describe('Règles économiques et transactions', () => {
     const { game } = atelier(); game.state.walletCents += 40000; game.state.stats.factoryIncome += 40000;
     game.buyPlan('azur.magnets'); game.buyPlan('azur.collector'); const raw = JSON.stringify(game.state);
     expect(parseSnapshot(raw)).toEqual(game.state);
-    for (const version of [1, 2, 3, 4, 5, 7]) { const bad = JSON.parse(raw); bad.saveVersion = version; expect(() => parseSnapshot(JSON.stringify(bad))).toThrow(); }
+    for (const version of [1, 2, 3, 4, 5, 6, 7, 9]) { const bad = JSON.parse(raw); bad.saveVersion = version; expect(() => parseSnapshot(JSON.stringify(bad))).toThrow(); }
     const noFinger = JSON.parse(raw); noFinger.upgrades = ['azur.initial_repair', 'azur.magnets', 'azur.collector']; expect(() => parseSnapshot(JSON.stringify(noFinger))).toThrow('Doigt');
     const wrongPrice = JSON.parse(raw); wrongPrice.walletCents++; wrongPrice.stats.upgradeExpenses--; expect(() => parseSnapshot(JSON.stringify(wrongPrice))).toThrow('dépenses');
     const duplicate = JSON.parse(raw); duplicate.plans = ['azur.collector']; expect(() => parseSnapshot(JSON.stringify(duplicate))).toThrow('plans');
@@ -159,10 +171,10 @@ describe('Règles économiques et transactions', () => {
   });
   it('migre les modules déjà installés du format 4 sans achat ni démontage', () => {
     const { game } = atelier(() => 0.999, true, true); game.state.collectorCharge = 7;
-    const old = JSON.parse(JSON.stringify(game.state)); old.saveVersion = 4; delete old.plans;
+    const old = olderFormat(game.state, 4); delete old.plans;
     expect(parseSnapshot(JSON.stringify(old))).toEqual(game.state);
     for (const version of [1, 2, 3]) {
-      const legacy = JSON.parse(JSON.stringify(newGame())); legacy.saveVersion = version; delete legacy.plans;
+      const legacy = olderFormat(newGame(), version); delete legacy.plans;
       if (version < 3) delete legacy.factory.events;
       expect(parseSnapshot(JSON.stringify(legacy)).plans).toEqual([]);
     }
@@ -301,7 +313,7 @@ describe('Aimants en essai de développement', () => {
   });
   it('fige attraction, bonus et retour au lancement ; recharge et paiement résistent aux échecs', () => {
     let sample = 0.999; const { game, fail, snapshot } = atelier(() => sample, true); sample = 0;
-    game.toggleAuto(); game.state.magnetCooldownMs = 0; game.state.heatCount = 100; game.state.chargeReady = true; game.activateBonus();
+    game.toggleAuto(); game.state.magnetCooldownMs = 0; game.state.charges = 1; game.state.heatCount = 0; game.activateBonus();
     const before = structuredClone(game.state); fail(true);
     expect(game.launch('auto')).toBeUndefined(); expect(game.state).toEqual(before);
     fail(false); game.retrySave(); game.toggleAuto(); const ball = game.launch('auto')!;
@@ -323,8 +335,7 @@ describe('Aimants en essai de développement', () => {
   });
   it('importe les anciens snapshots et refuse recharges et attractions incohérentes', () => {
     for (const version of [1, 2, 3]) {
-      const old = JSON.parse(JSON.stringify(newGame())); delete old.magnetCooldownMs;
-      old.saveVersion = version; if (version < 3) delete old.factory.events;
+      const old = olderFormat(newGame(), version); delete old.magnetCooldownMs; if (version < 3) delete old.factory.events;
       expect(parseSnapshot(JSON.stringify(old)).magnetCooldownMs).toBe(5000);
     }
     let sample = 0.999; const { game } = atelier(() => sample, true); sample = 0;
@@ -385,7 +396,7 @@ describe('Collecteur de ratés en essai de développement', () => {
     sample = 0; game.settle(game.launch('auto')!.id); expect(game.state.collectorCharge).toBe(1);
     game.state.magnetCooldownMs = 0; sample = 0.7; const attracted = game.launch('auto')!;
     expect(attracted).toMatchObject({ magnetFrom: 8, multiplier: 100 }); game.settle(attracted.id); expect(game.state.collectorCharge).toBe(1);
-    game.state.chargeReady = true; game.state.heatCount = 100; game.activateBonus();
+    game.state.charges = 1; game.state.heatCount = 0; game.activateBonus();
     const doubled = game.launch('auto')!; expect(doubled.returnCents).toBe(100); game.settle(doubled.id); expect(game.state.collectorCharge).toBe(2);
   });
   it('garde une récompense au plafond et réserve la place libérée avant le Doigt', () => {
@@ -421,7 +432,7 @@ describe('Collecteur de ratés en essai de développement', () => {
     const resumed = reconcile(parseSnapshot(JSON.stringify(game.state))); expect(resumed.state.collectorCharge).toBe(10); expect(resumed.count).toBe(1);
     expect(reconcile(resumed.state).state.collectorCharge).toBe(10); expect(resumed.state.pendingBalls).toHaveLength(0);
     const next = new Game(resumed.state, () => {}, () => 0, { collectorTrial: true, magnetsTrial: true }); next.writable = true;
-    next.state.chargeReady = true; next.state.heatCount = 100; next.activateBonus(); next.state.magnetCooldownMs = 0;
+    next.state.charges = 1; next.state.heatCount = 0; next.activateBonus(); next.state.magnetCooldownMs = 0;
     next.advance(1); const reward = next.state.pendingBalls[0]; expect(reward).toMatchObject({ origin: 'collector', bonus: 2, returnCents: 60 }); expect(reward.magnetFrom).toBeUndefined();
     const paid = reconcile(parseSnapshot(JSON.stringify(next.state))); expect(paid.total).toBe(60); expect(paid.state.collectorCharge).toBe(0);
     expect(reconcile(paid.state).total).toBe(0); expect(parseSnapshot(JSON.stringify(paid.state))).toEqual(paid.state);
@@ -429,29 +440,237 @@ describe('Collecteur de ratés en essai de développement', () => {
   });
   it('migre les formats 1/2/3 sans charge inventée et refuse les contributions incohérentes', () => {
     for (const version of [1, 2, 3]) {
-      const old = JSON.parse(JSON.stringify(newGame())); old.saveVersion = version; delete old.collectorCharge;
+      const old = olderFormat(newGame(), version); delete old.collectorCharge;
       if (version < 3) delete old.factory.events;
-      const migrated = parseSnapshot(JSON.stringify(old)); expect(migrated.saveVersion).toBe(6); expect(migrated.collectorCharge).toBe(0);
+      const migrated = parseSnapshot(JSON.stringify(old)); expect(migrated.saveVersion).toBe(8); expect(migrated.collectorCharge).toBe(0);
     }
     let sample = 0.999; const { game } = atelier(() => sample, false, true); sample = 0; game.launch();
     for (const charge of [-1, 11, 0.5, null]) { const candidate = JSON.parse(JSON.stringify(game.state)); candidate.collectorCharge = charge; expect(() => parseSnapshot(JSON.stringify(candidate))).toThrow(); }
     const candidate = JSON.parse(JSON.stringify(game.state)); candidate.pendingBalls[0].origin = 'collector'; candidate.pendingBalls[0].betCents = 0; candidate.pendingBalls[0].returnCents = 30;
     expect(() => parseSnapshot(JSON.stringify(candidate))).toThrow('contribution au Collecteur');
-    const old = JSON.parse(JSON.stringify(game.state)); old.saveVersion = 3; expect(() => parseSnapshot(JSON.stringify(old))).toThrow('Collecteur dans un ancien format');
+    const old = olderFormat(game.state, 3); expect(() => parseSnapshot(JSON.stringify(old))).toThrow('Collecteur dans un ancien format');
   });
   it('migre une vraie partie du format 3 avec gains figés et programme d’usine déjà en cours', () => {
     let sample = 0.999; const { game } = atelier(() => sample, true); sample = 0;
-    game.state.heatCount = 100; game.state.chargeReady = true; game.activateBonus(); game.toggleAuto(); game.state.magnetCooldownMs = 0;
+    game.state.charges = 1; game.state.heatCount = 0; game.activateBonus(); game.toggleAuto(); game.state.magnetCooldownMs = 0;
     game.launch('auto'); game.launch();
-    const old = JSON.parse(JSON.stringify(game.state)); old.saveVersion = 3; delete old.collectorCharge;
+    const old = olderFormat(game.state, 3); delete old.collectorCharge;
     const migrated = parseSnapshot(JSON.stringify(old));
-    expect(migrated).toEqual({ ...game.state, saveVersion: 6, collectorCharge: 0 });
+    expect(migrated).toEqual({ ...game.state, saveVersion: 8, collectorCharge: 0 });
     const resumed = reconcile(migrated); expect(resumed.total).toBe(160); expect(reconcile(resumed.state).total).toBe(0);
     const working = new Game(resumed.state, () => {}, () => 0.5); working.writable = true; working.startFactory(); working.advance(12345, true, 'factory');
-    const previous = JSON.parse(JSON.stringify(working.state)); previous.saveVersion = 3; delete previous.collectorCharge;
+    const previous = olderFormat(working.state, 3); delete previous.collectorCharge;
     const service = parseSnapshot(JSON.stringify(previous));
     expect(service.factory).toEqual(working.state.factory); expect(service.factoryRemainingMs).toBe(working.state.factoryRemainingMs);
     expect(service.walletCents).toBe(working.state.walletCents); expect(service.history).toEqual(working.state.history); expect(service.bonusRemainingMs).toBe(working.state.bonusRemainingMs);
+  });
+});
+
+describe('Condensateur de poche et Boîte de vitesses', () => {
+  function equipped(random = () => 0.999) {
+    const context = atelier(random); const { game } = context;
+    // Fixture de salaires historiques cohérente avec le bilan monétaire.
+    game.state.walletCents += 40000; game.state.stats.factoryIncome += 40000;
+    return context;
+  }
+  it('vend le Condensateur à 150 après réparation et la Boîte à 100 avec le Doigt, installés dès l’achat', () => {
+    const fresh = setup(() => 0.999).game; fresh.state.walletCents += 40000; fresh.state.stats.factoryIncome += 40000;
+    expect(fresh.buyPlan('azur.capacitor')).toBe(false); expect(fresh.buyPlan('azur.gearbox')).toBe(false);
+    for (let i = 0; i < 2; i++) { fresh.settle(fresh.launch()!.id); fresh.advance(500); }
+    fresh.buyPlan('azur.initial_repair');
+    expect(fresh.buyPlan('azur.gearbox')).toBe(false); expect(fresh.notice).toContain('Doigt');
+    const { game } = equipped(); const before = game.state.walletCents;
+    expect(game.buyPlan('azur.capacitor')).toBe(true); expect(game.state.walletCents).toBe(before - 15000);
+    expect(game.buyPlan('azur.gearbox')).toBe(true); expect(game.state.walletCents).toBe(before - 25000);
+    expect(game.buyPlan('azur.capacitor')).toBe(false); expect(game.state.walletCents).toBe(before - 25000);
+    expect(game.state.upgrades).toEqual(expect.arrayContaining(['azur.capacitor', 'azur.gearbox'])); expect(game.state.plans).toEqual([]);
+    expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state);
+  });
+  it('sans Condensateur : une charge au plus, aucun comptage une fois prête', () => {
+    const { game } = equipped(); game.toggleAuto();
+    while (game.state.charges === 0) game.settle(game.launch('auto')!.id);
+    for (let i = 0; i < 30; i++) game.settle(game.launch('auto')!.id);
+    expect(game.state.charges).toBe(1); expect(game.state.heatCount).toBe(0);
+  });
+  it('avec Condensateur : deux charges, une par activation, ×2 sans cumul ni comptage pendant le bonus', () => {
+    const { game } = equipped(); game.buyPlan('azur.capacitor'); game.toggleAuto();
+    for (let i = 0; i < 200; i++) game.settle(game.launch('auto')!.id);
+    expect(game.state.charges).toBe(2); expect(game.state.heatCount).toBe(0);
+    game.settle(game.launch('auto')!.id); expect(game.state.charges).toBe(2); expect(game.state.heatCount).toBe(0);
+    expect(game.activateBonus()).toBe(true); expect(game.state.charges).toBe(1);
+    expect(game.activateBonus()).toBe(false); expect(game.state.charges).toBe(1);
+    const boosted = game.launch('auto')!; expect(boosted.bonus).toBe(2); game.settle(boosted.id);
+    expect(game.state.heatCount).toBe(0);
+    game.autoEnabled = false; game.advance(10000); expect(game.state.bonusRemainingMs).toBe(0);
+    game.toggleAuto(); for (let i = 0; i < 40; i++) game.settle(game.launch('auto')!.id);
+    expect(game.state.charges).toBe(1); expect(game.state.heatCount).toBe(40);
+    expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state);
+    expect(game.activateBonus()).toBe(true); expect(game.state.charges).toBe(0); expect(game.state.heatCount).toBe(40);
+    expect(game.launch('auto')!.bonus).toBe(2);
+    expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state);
+  });
+  it('mode rafale : 3 billes à 0,25 s toutes les 6 s, même production que le rythme régulier', () => {
+    const count = (mode: 'steady' | 'burst') => {
+      const { game } = equipped(); game.buyPlan('azur.gearbox'); if (mode === 'burst') expect(game.setGear('burst')).toBe(true);
+      game.toggleAuto(); const times: number[] = [];
+      for (let t = 50; t <= 60000; t += 50) {
+        const before = game.state.nextBallSequence; game.advance(50);
+        if (game.state.nextBallSequence > before) times.push(t);
+        for (const ball of [...game.state.pendingBalls]) game.settle(ball.id);
+      }
+      return times;
+    };
+    const steady = count('steady'), burst = count('burst');
+    expect(steady.slice(0, 3)).toEqual([2000, 4000, 6000]);
+    expect(burst.slice(0, 6)).toEqual([2000, 2250, 2500, 8000, 8250, 8500]);
+    expect(burst).toHaveLength(steady.length);
+  });
+  it('levier sauvegardé, cadence repartie de zéro, refusé sans Boîte et pendant le service', () => {
+    const { game } = equipped();
+    expect(game.setGear('burst')).toBe(false);
+    game.buyPlan('azur.gearbox'); expect(game.setGear('burst')).toBe(true); expect(game.state.gearMode).toBe('burst');
+    expect(game.setGear('burst')).toBe(false);
+    expect(parseSnapshot(JSON.stringify(game.state)).gearMode).toBe('burst');
+    game.toggleAuto(); game.advance(1900); expect(game.setGear('steady')).toBe(true);
+    const sequence = game.state.nextBallSequence; game.advance(1900); expect(game.state.nextBallSequence).toBe(sequence);
+    game.advance(100); expect(game.state.nextBallSequence).toBe(sequence + 1);
+    for (const ball of [...game.state.pendingBalls]) game.settle(ball.id);
+    game.startFactory(); expect(game.setGear('burst')).toBe(false);
+  });
+  it('au plafond, les billes d’une rafale refusées ne sont pas mises en file', () => {
+    const { game } = equipped(); game.buyPlan('azur.gearbox'); game.setGear('burst'); game.toggleAuto();
+    while (game.state.pendingBalls.length < CONFIG.maxBalls) { if (!game.launch()) game.advance(500, true); }
+    const sequence = game.state.nextBallSequence;
+    game.advance(2600); expect(game.state.nextBallSequence).toBe(sequence);
+    // Tout libérer : la cadence reprend à son rythme, sans rattraper les billes refusées.
+    for (const ball of [...game.state.pendingBalls]) game.settle(ball.id);
+    const free = game.state.nextBallSequence; for (let i = 0; i < 120; i++) game.advance(50);
+    expect(game.state.nextBallSequence - free).toBe(CONFIG.burstSize);
+  });
+  it('migre le format 6 : charge prête conservée, progression gardée, rythme régulier', () => {
+    const ready = newGame(); ready.charges = 1;
+    const migratedReady = parseSnapshot(JSON.stringify(olderFormat(ready, 6)));
+    expect(migratedReady).toMatchObject({ saveVersion: 8, charges: 1, heatCount: 0, gearMode: 'steady' }); expect(migratedReady).not.toHaveProperty('chargeReady');
+    const partial = newGame(); partial.heatCount = 42;
+    expect(parseSnapshot(JSON.stringify(olderFormat(partial, 6)))).toMatchObject({ charges: 0, heatCount: 42 });
+    const { game } = equipped(); game.buyPlan('azur.capacitor'); const raw = JSON.parse(JSON.stringify(game.state));
+    expect(() => parseSnapshot(JSON.stringify(olderFormat(game.state, 6)))).toThrow('ancien format');
+    for (const change of [{ charges: 3 }, { charges: 2, heatCount: 5 }, { heatCount: 100 }, { gearMode: 'burst' }, { gearMode: 'turbo' }, { chargeReady: true }]) {
+      expect(() => parseSnapshot(JSON.stringify({ ...raw, ...change }))).toThrow();
+    }
+    expect(parseSnapshot(JSON.stringify({ ...raw, charges: 2, heatCount: 0 })).charges).toBe(2);
+  });
+});
+
+describe('Duplicateur, faille, recalibrage et module numérique', () => {
+  /** Source aléatoire rejouée dans l’ordre, puis constante. */
+  function sequence(values: number[], rest = 0.999) { let i = 0; return () => (i < values.length ? values[i++] : rest); }
+  /** Retours bruts ajoutés de façon cohérente avec le bilan (production gratuite). */
+  function boostReturns(game: Game, cents: number) { game.state.stats.grossReturns += cents; game.state.stats.freeProduction += cents; game.state.walletCents += cents; }
+  function withDuplicator(random: () => number = () => 0.999) {
+    const context = atelier(random); const { game } = context;
+    game.state.walletCents += 60000; game.state.stats.factoryIncome += 60000;
+    expect(game.buyPlan('azur.duplicator')).toBe(true);
+    return context;
+  }
+  function recalibrated() {
+    const context = withDuplicator(); const { game } = context;
+    boostReturns(game, CONFIG.instabilityThreshold); expect(game.recalibrate()).toBe(true);
+    return context;
+  }
+  it('Duplicateur à 300 pièces après réparation ; il ouvre la faille à partir des retours du moment', () => {
+    const fresh = setup().game; fresh.state.walletCents += 60000; fresh.state.stats.factoryIncome += 60000;
+    expect(fresh.buyPlan('azur.duplicator')).toBe(false);
+    const { game } = atelier(); game.state.walletCents += 60000; game.state.stats.factoryIncome += 60000;
+    const before = game.state.walletCents, gross = game.state.stats.grossReturns;
+    expect(game.buyPlan('azur.duplicator')).toBe(true); expect(game.state.walletCents).toBe(before - 30000);
+    expect(game.state.instabilityBaseCents).toBe(gross);
+    expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state);
+  });
+  it('double une bille sur un gain avec 1 chance sur 20, tirée au lancement et payée une fois', () => {
+    const { game } = withDuplicator(); game.state.manualCooldownMs = 0;
+    (game as unknown as { random: () => number }).random = sequence([0.9995, 0.2, 0.01]);
+    const doubled = game.launch()!;
+    expect(doubled).toMatchObject({ multiplier: 4000, duplicated: true, returnCents: 8000 });
+    const wallet = game.state.walletCents; game.settle(doubled.id); game.settle(doubled.id);
+    expect(game.state.walletCents).toBe(wallet + 8000); expect(game.state.history[0].duplicated).toBe(true);
+    game.advance(500); (game as unknown as { random: () => number }).random = sequence([0.9995, 0.2, 0.05]);
+    expect(game.launch()).not.toHaveProperty('duplicated');
+    // Une perte ne consomme aucun tirage de duplication.
+    game.advance(500); const draws: number[] = []; (game as unknown as { random: () => number }).random = () => { draws.push(0); return 0.1; };
+    const loss = game.launch()!; expect(loss.multiplier).toBe(30); expect(loss).not.toHaveProperty('duplicated'); expect(draws).toHaveLength(1);
+    expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state);
+    const forged = JSON.parse(JSON.stringify(game.state)); forged.pendingBalls.at(-1).duplicated = true; forged.pendingBalls.at(-1).returnCents *= 2;
+    expect(() => parseSnapshot(JSON.stringify(forged))).toThrow('duplication');
+  });
+  it('la faille se remplit avec 1 000 pièces de retours bruts ; recalibrage refusé avant, avec billes ou bonus', () => {
+    const { game } = withDuplicator();
+    expect(game.recalibrate()).toBe(false); expect(game.notice).toContain('Faille instable');
+    boostReturns(game, CONFIG.instabilityThreshold - 1); expect(game.recalibrate()).toBe(false); expect(game.notice).toContain('99 %');
+    boostReturns(game, 1); game.state.manualCooldownMs = 0; const ball = game.launch()!;
+    expect(game.recalibrate()).toBe(false); expect(game.notice).toContain('billes');
+    game.settle(ball.id); game.state.charges = 1; game.state.heatCount = 0; game.activateBonus();
+    expect(game.recalibrate()).toBe(false); expect(game.notice).toContain('Décharge');
+  });
+  it('recalibrage : solde à 19, améliorations retirées sauf réparation, historique et statistiques conservés, module offert', () => {
+    const { game } = withDuplicator(); game.buyPlan('azur.capacitor'); game.buyPlan('azur.gearbox'); game.setGear('burst'); game.setBet(300);
+    boostReturns(game, CONFIG.instabilityThreshold); game.state.charges = 1; game.state.heatCount = 0; game.state.collectorCharge = 0;
+    const before = structuredClone(game.state); game.toggleAuto();
+    expect(game.recalibrate()).toBe(true);
+    const s = game.state;
+    expect(s.walletCents).toBe(CONFIG.initialWallet); expect(s.upgrades).toEqual(['azur.initial_repair']); expect(s.repairPurchased).toBe(true);
+    expect(s).toMatchObject({ recalibrations: 1, charges: 0, heatCount: 0, gearMode: 'steady', selectedBetCents: 100, preferredBetCents: 100, instabilityBaseCents: before.stats.grossReturns });
+    expect(s.history).toEqual(before.history); expect(s.stats.settled).toBe(before.stats.settled); expect(s.preferences).toEqual(before.preferences);
+    expect(s.stats.recalibrationWithdrawn).toBe(before.walletCents - CONFIG.initialWallet);
+    expect(s.stats.discardedUpgrades).toBe(before.upgrades.filter(id => id !== 'azur.initial_repair').reduce((sum, id) => sum + UPGRADES[id].price, 0));
+    expect(game.autoEnabled).toBe(false);
+    expect(parseSnapshot(JSON.stringify(s))).toEqual(s);
+    // Le Duplicateur est perdu : il faut le racheter pour rouvrir la faille.
+    expect(game.recalibrate()).toBe(false); expect(game.notice).toContain('Duplicateur');
+  });
+  it('téléchargements : seulement après un recalibrage, payés une fois, permanents', () => {
+    const { game: early } = withDuplicator(); expect(early.buyDownload('download.bet_memory')).toBe(false); expect(early.notice).toContain('recalibrage');
+    const { game } = recalibrated(); game.state.walletCents += 60000; game.state.stats.factoryIncome += 60000;
+    const wallet = game.state.walletCents;
+    expect(game.buyDownload('download.magnets_v2')).toBe(false); expect(game.notice).toContain('Aimants');
+    for (const id of ['download.bet_memory', 'download.auto_discharge', 'download.fast_heat'] as const) expect(game.buyDownload(id)).toBe(true);
+    expect(game.buyDownload('download.bet_memory')).toBe(false);
+    expect(game.state.walletCents).toBe(wallet - 3000 - 6000 - 15000); expect(game.state.stats.downloadExpenses).toBe(24000);
+    expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state);
+    // Permanents : conservés au recalibrage suivant.
+    game.buyPlan('azur.initial_repair'); game.state.walletCents += 30000; game.state.stats.factoryIncome += 30000; game.buyPlan('azur.duplicator');
+    boostReturns(game, CONFIG.instabilityThreshold); expect(game.recalibrate()).toBe(true);
+    expect(game.state.downloads).toEqual(['download.bet_memory', 'download.auto_discharge', 'download.fast_heat']); expect(game.state.recalibrations).toBe(2);
+    expect(parseSnapshot(JSON.stringify(game.state))).toEqual(game.state);
+  });
+  it('effets : Surchauffe en 80 billes, Décharge auto avec le Doigt, Aimants en 4 s, mise mémorisée', () => {
+    const { game } = recalibrated(); game.state.walletCents += 90000; game.state.stats.factoryIncome += 90000;
+    game.buyPlan('azur.auto_launcher'); game.buyPlan('azur.magnets');
+    for (const id of ['download.fast_heat', 'download.auto_discharge', 'download.magnets_v2', 'download.bet_memory'] as const) expect(game.buyDownload(id)).toBe(true);
+    expect(game.state.magnetCooldownMs).toBe(4000);
+    game.toggleAuto();
+    for (let i = 0; i < 79; i++) game.settle(game.launch('auto')!.id);
+    expect(game.state.charges).toBe(0); game.settle(game.launch('auto')!.id); expect(game.state.charges).toBe(1);
+    game.advance(16); expect(game.state.charges).toBe(0); expect(game.state.bonusRemainingMs).toBeGreaterThan(9900);
+    game.state.magnetCooldownMs = 0; const attracted = game.launch('auto')!;
+    if (attracted.magnetFrom !== undefined) expect(game.state.magnetCooldownMs).toBe(4000);
+    game.stopAuto(); for (const ball of [...game.state.pendingBalls]) game.settle(ball.id);
+    expect(game.setBet(1000)).toBe(true); expect(game.state.selectedBetCents).toBe(1000);
+    const spend = game.state.walletCents - 450; game.state.walletCents -= spend; game.state.stats.paidBets += spend; game.state.stats.paidProfit -= spend;
+    game.setPreferences({ sound: false }); expect(game.state.selectedBetCents).toBe(400); expect(game.state.preferredBetCents).toBe(1000);
+    game.state.walletCents += spend; game.state.stats.factoryIncome += spend; game.setPreferences({ sound: false }); expect(game.state.selectedBetCents).toBe(1000);
+  });
+  it('migre le format 7 sans recalibrage ni téléchargement, et refuse les incohérences', () => {
+    const migrated = parseSnapshot(JSON.stringify(olderFormat(newGame(), 7)));
+    expect(migrated).toMatchObject({ saveVersion: 8, recalibrations: 0, instabilityBaseCents: 0, downloads: [], preferredBetCents: 100 });
+    expect(migrated.stats).toMatchObject({ recalibrationWithdrawn: 0, discardedUpgrades: 0, downloadExpenses: 0 });
+    const { game } = withDuplicator(); expect(() => parseSnapshot(JSON.stringify(olderFormat(game.state, 7)))).toThrow('ancien format');
+    const raw = JSON.parse(JSON.stringify(recalibrated().game.state));
+    for (const change of [{ downloads: ['download.unknown'] }, { downloads: ['download.bet_memory'] }, { recalibrations: -1 }, { preferredBetCents: 150 }, { instabilityBaseCents: raw.stats.grossReturns + 1 }]) {
+      expect(() => parseSnapshot(JSON.stringify({ ...raw, ...change }))).toThrow();
+    }
+    expect(() => parseSnapshot(JSON.stringify({ ...raw, recalibrations: 0 }))).toThrow();
+    const fresh = JSON.parse(JSON.stringify(newGame())); fresh.downloads = ['download.bet_memory']; expect(() => parseSnapshot(JSON.stringify(fresh))).toThrow('téléchargements');
   });
 });
 
@@ -459,7 +678,7 @@ describe('Suppression de la progression', () => {
   it('repart à 19 pièces sans ancien résultat ni vol, conserve les réglages et arrête le Doigt', () => {
     const { game, snapshot } = atelier();
     game.setPreferences({ sound: true, reducedMotion: true, quality: 'low' }); game.setBet(1000);
-    game.state.heatCount = 100; game.state.chargeReady = true; game.activateBonus();
+    game.state.charges = 1; game.state.heatCount = 0; game.activateBonus();
     game.toggleAuto(); game.launch('auto');
     expect(game.resetProgress()).toBe(true);
     const fresh = newGame(); fresh.preferences = structuredClone(game.state.preferences); fresh.savedAt = game.state.savedAt;
@@ -502,7 +721,7 @@ describe('Temps actif, usine et Décharge', () => {
   });
   it('fige le bonus au lancement, ne recharge pas pendant son activité', () => {
     const { game } = atelier(); game.toggleAuto();
-    while (game.state.heatCount < 100) game.settle(game.launch('auto')!.id);
+    while (game.state.charges === 0) game.settle(game.launch('auto')!.id);
     const beforeBonus = game.launch('auto')!;
     expect(beforeBonus.bonus).toBe(1);
     expect(game.activateBonus()).toBe(true); expect(game.activateBonus()).toBe(false);
@@ -517,7 +736,7 @@ describe('Temps actif, usine et Décharge', () => {
   });
   it('base 1, x0,5, bonus2 donne1 et le service suspend le bonus', () => {
     const { game } = setup(outcomeRandom(50));
-    game.state.chargeReady = true; game.state.heatCount = 100; game.activateBonus();
+    game.state.charges = 1; game.state.heatCount = 0; game.activateBonus();
     const ball = game.launch()!; expect(ball.bonus).toBe(2); expect(ball.returnCents).toBe(100); game.settle(ball.id);
     game.advance(2000); game.startFactory(); game.advance(60000);
     expect(game.state.bonusRemainingMs).toBe(8000);
@@ -539,7 +758,7 @@ describe('Temps actif, usine et Décharge', () => {
 describe('Persistance et import', () => {
   it('accepte les anciens retours ×10 figés, sans les recalculer ni les payer deux fois', () => {
     const { game } = setup(outcomeRandom(50));
-    game.state.chargeReady = true; game.state.heatCount = 100; game.activateBonus(); game.launch();
+    game.state.charges = 1; game.state.heatCount = 0; game.activateBonus(); game.launch();
     const legacy = structuredClone(game.state);
     legacy.pendingBalls[0].bonus = 10; legacy.pendingBalls[0].returnCents = 500;
     const resumed = reconcile(parseSnapshot(JSON.stringify(legacy)));
@@ -656,8 +875,8 @@ describe('Tri des billes à l’usine', () => {
     expect(parseSnapshot(JSON.stringify(game.state)).factory.status).toBe('exploded');
   });
   it('migration des anciennes sauvegardes : solde inchangé et ancien service terminé une fois', () => {
-    const old = { ...newGame(), saveVersion: 1, factoryRemainingMs: 8000 } as Record<string, unknown>; delete old.factory;
-    const migrated = parseSnapshot(JSON.stringify(old)); expect(migrated.saveVersion).toBe(6); expect(migrated.factory.legacy).toBe(true);
+    const old = { ...olderFormat(newGame(), 1), factoryRemainingMs: 8000 } as Record<string, unknown>; delete old.factory;
+    const migrated = parseSnapshot(JSON.stringify(old)); expect(migrated.saveVersion).toBe(8); expect(migrated.factory.legacy).toBe(true);
     const game = new Game(migrated, () => {}); game.writable = true;
     expect(game.hitFactoryBall(1)).toBe(false); game.advance(8000, true, 'factory');
     expect(game.state.walletCents).toBe(3400); expect(parseSnapshot(JSON.stringify(game.state))).toBeDefined();
@@ -746,8 +965,8 @@ describe('Événements du tapis d’usine', () => {
   });
   it('migre un service du format 2 sans lui ajouter un événement en cours de route', () => {
     const { game } = setup(() => 0.5); game.startFactory(); game.state.factory.events = []; game.advance(17001, true, 'factory'); game.hitFactoryBall(game.state.factory.balls[0].id);
-    const previous = JSON.parse(JSON.stringify(game.state)); previous.saveVersion = 2; delete previous.factory.events;
-    const migrated = parseSnapshot(JSON.stringify(previous)); expect(migrated.saveVersion).toBe(6); expect(migrated.factory.events).toEqual([]);
+    const previous = olderFormat(game.state, 2); delete previous.factory.events;
+    const migrated = parseSnapshot(JSON.stringify(previous)); expect(migrated.saveVersion).toBe(8); expect(migrated.factory.events).toEqual([]);
     expect(migrated.walletCents).toBe(game.state.walletCents); expect(migrated.factory.greyHits).toBe(1); expect(migrated.factory.balls).toEqual(game.state.factory.balls);
     const resumed = new Game(migrated, () => {}, () => 0.5); resumed.writable = true; resumed.advance(migrated.factoryRemainingMs, true, 'factory');
     expect(resumed.state.walletCents).toBe(1950); resumed.startFactory(); expect(resumed.state.factory.events).toHaveLength(3);

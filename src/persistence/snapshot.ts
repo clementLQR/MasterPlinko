@@ -1,4 +1,4 @@
-import { CONFIG, EXITS, UPGRADES } from '../config';
+import { CONFIG, DOWNLOADS, EXITS, UPGRADES } from '../config';
 import type { UpgradeId } from '../config';
 import type { Ball, GameState } from '../game/state';
 import { factoryClock, factorySpawnTime, newFactory } from '../game/packing';
@@ -22,7 +22,8 @@ function validateBall(value: unknown, nextSequence: number, history: boolean): a
   requireValid(integer(value.exit, 0, 14) && value.multiplier === EXITS[value.exit], 'sortie et multiplicateur.');
   if (Object.hasOwn(value, 'magnetFrom')) requireValid(value.origin === 'auto' && integer(value.magnetFrom, 1, 13) && Math.abs((value.exit as number) - value.magnetFrom) === 1 && (value.multiplier as number) > EXITS[value.magnetFrom], 'attraction magnétique.');
   requireValid(value.bonus === 1 || value.bonus === CONFIG.bonusFactor || value.bonus === 10, 'facteur de Décharge.');
-  requireValid(integer(value.returnCents) && value.returnCents === Math.round(value.baseCents * (value.multiplier as number) / 100) * value.bonus, 'retour figé.');
+  if (Object.hasOwn(value, 'duplicated')) requireValid(value.duplicated === true && (value.multiplier as number) >= CONFIG.duplicateMinMultiplier, 'duplication.');
+  requireValid(integer(value.returnCents) && value.returnCents === Math.round(value.baseCents * (value.multiplier as number) / 100) * value.bonus * (value.duplicated ? 2 : 1), 'retour figé.');
   if (history) requireValid(value.netCents === value.returnCents - value.betCents, 'bénéfice net.');
 }
 
@@ -31,11 +32,13 @@ export function parseSnapshot(raw: string): GameState {
   let value: unknown;
   try { value = JSON.parse(raw); } catch { throw new Error('Le fichier ne contient pas un JSON valide.'); }
   requireValid(object(value), 'snapshot manquant.');
-  requireValid([1, 2, 3, 4, 5, 6].includes(value.saveVersion as number), 'format non pris en charge. Votre partie actuelle est conservée.');
+  requireValid([1, 2, 3, 4, 5, 6, 7, 8].includes(value.saveVersion as number), 'format non pris en charge. Votre partie actuelle est conservée.');
   const legacy = value.saveVersion === 1;
   const classic = value.saveVersion === 1 || value.saveVersion === 2;
   const preCollector = (value.saveVersion as number) < 4;
   const beforeModules = (value.saveVersion as number) < 6;
+  const beforeCharges = (value.saveVersion as number) < 7;
+  const beforeRift = (value.saveVersion as number) < 8;
   if ((value.saveVersion as number) < 5) {
     requireValid(!Object.hasOwn(value, 'plans') || Array.isArray(value.plans) && value.plans.length === 0, 'plans dans un ancien format.');
     value.plans = [];
@@ -59,23 +62,53 @@ export function parseSnapshot(raw: string): GameState {
   requireValid(Array.isArray(value.plans) && value.plans.every(id => typeof id === 'string' && Object.hasOwn(UPGRADES, id) && !(value.upgrades as string[]).includes(id)) && new Set(value.plans).size === value.plans.length, 'plans.');
   const owned = [...value.upgrades, ...value.plans];
   if (beforeModules) requireValid(!owned.some(id => id === 'azur.magnets' || id === 'azur.collector'), 'nouveaux modules dans un ancien format.');
+  if (beforeCharges) requireValid(!owned.some(id => id === 'azur.capacitor' || id === 'azur.gearbox'), 'Condensateur ou Boîte de vitesses dans un ancien format.');
+  // Formats 1 à 7 : ni Duplicateur, ni recalibrage, ni téléchargement ; la mise choisie devient la mise mémorisée.
+  const riftStats = ['recalibrationWithdrawn', 'discardedUpgrades', 'downloadExpenses'];
+  if (beforeRift) {
+    requireValid(!owned.includes('azur.duplicator') && !balls.some(ball => Object.hasOwn(ball, 'duplicated')), 'Duplicateur dans un ancien format.');
+    requireValid(!['recalibrations', 'instabilityBaseCents', 'downloads', 'preferredBetCents'].some(key => Object.hasOwn(value, key)), 'recalibrage dans un ancien format.');
+    value.recalibrations = 0; value.instabilityBaseCents = 0; value.downloads = []; value.preferredBetCents = value.selectedBetCents;
+    if (object(value.stats)) { const old = value.stats; requireValid(!riftStats.some(key => Object.hasOwn(old, key)), 'recalibrage dans un ancien format.'); for (const key of riftStats) old[key] = 0; }
+  }
+  requireValid(integer(value.recalibrations), 'recalibrages.');
+  requireValid(Array.isArray(value.downloads) && value.downloads.every(id => typeof id === 'string' && Object.hasOwn(DOWNLOADS, id)) && new Set(value.downloads).size === value.downloads.length && (value.downloads.length === 0 || value.recalibrations > 0), 'téléchargements.');
+  requireValid(integer(value.preferredBetCents, CONFIG.minBet, CONFIG.maxBet) && value.preferredBetCents % 100 === 0, 'mise mémorisée.');
   requireValid(!owned.includes('azur.magnets') || value.upgrades.includes('azur.auto_launcher'), 'aimants sans Doigt installé.');
+  requireValid(!owned.includes('azur.gearbox') || value.upgrades.includes('azur.auto_launcher'), 'Boîte de vitesses sans Doigt installé.');
   requireValid(typeof value.repairTriggered === 'boolean' && typeof value.repairPurchased === 'boolean', 'état de réparation.');
   requireValid(value.repairPurchased === value.upgrades.includes('azur.initial_repair') && (!value.repairPurchased || value.repairTriggered), 'réparation incohérente.');
   requireValid(value.repairPurchased || value.upgrades.length === 0, 'atelier verrouillé.');
   requireValid((value.repairPurchased || value.plans.every(id => id === 'azur.initial_repair')) && (value.repairTriggered || value.plans.length === 0), 'plans avant déblocage.');
   requireValid(value.repairPurchased || (value.collectorCharge === 0 && !balls.some(ball => ball.origin === 'collector' || ball.collectorEligible)), 'Collecteur avant réparation.');
   requireValid(!balls.some(ball => ball.origin === 'auto') || value.upgrades.includes('azur.auto_launcher'), 'automatisation non achetée.');
-  requireValid(integer(value.heatCount, 0, CONFIG.chargeCount) && typeof value.chargeReady === 'boolean' && value.chargeReady === (value.heatCount === CONFIG.chargeCount), 'charge.');
+  // Formats 1 à 6 : une charge au plus, `chargeReady` vrai exactement quand la jauge est pleine.
+  if (beforeCharges) {
+    requireValid(integer(value.heatCount, 0, CONFIG.chargeCount) && typeof value.chargeReady === 'boolean' && value.chargeReady === (value.heatCount === CONFIG.chargeCount), 'charge.');
+    requireValid(value.bonusRemainingMs === 0 || (!value.chargeReady && value.heatCount === 0), 'charge pendant Décharge.');
+    requireValid(!Object.hasOwn(value, 'charges') && !Object.hasOwn(value, 'gearMode'), 'Condensateur ou Boîte de vitesses dans un ancien format.');
+    value.charges = value.chargeReady ? 1 : 0;
+    if (value.chargeReady) value.heatCount = 0;
+    delete value.chargeReady; value.gearMode = 'steady';
+  }
+  requireValid(!Object.hasOwn(value, 'chargeReady'), 'ancien champ de charge.');
+  const capacity = (value.upgrades as string[]).includes('azur.capacitor') ? CONFIG.capacitorCharges : 1;
+  const heatMax = ((value.downloads as string[]).includes('download.fast_heat') ? CONFIG.fastHeatCount : CONFIG.chargeCount) - 1;
+  requireValid(integer(value.heatCount, 0, heatMax) && integer(value.charges, 0, capacity) && (value.charges < capacity || value.heatCount === 0), 'charge.');
+  requireValid(value.gearMode === 'steady' || (value.gearMode === 'burst' && (value.upgrades as string[]).includes('azur.gearbox')), 'rythme du Doigt.');
   requireValid(integer(value.bonusRemainingMs, 0, CONFIG.bonusDuration) && integer(value.factoryRemainingMs, 0, legacy ? 15000 : CONFIG.factoryDuration) && integer(value.manualCooldownMs, 0, CONFIG.manualInterval), 'durées actives.');
   // Extension additive : les anciens formats 1/2/3 commencent avec une recharge complète.
   if (!Object.hasOwn(value, 'magnetCooldownMs')) value.magnetCooldownMs = CONFIG.magnetRecharge;
   requireValid(integer(value.magnetCooldownMs, 0, CONFIG.magnetRecharge), 'recharge des aimants.');
-  requireValid(value.bonusRemainingMs === 0 || (!value.chargeReady && value.heatCount === 0), 'charge pendant Décharge.');
+  // Pendant un bonus, la charge utilisée laisse toujours une place ; sans Condensateur, jauge à zéro.
+  requireValid(value.bonusRemainingMs === 0 || (value.charges < capacity && (capacity > 1 || value.heatCount === 0)), 'charge pendant Décharge.');
   requireValid(value.factoryRemainingMs === 0 || value.pendingBalls.length === 0, 'billes pendant le service.');
   requireValid(object(value.stats), 'statistiques.');
   const stats = value.stats;
-  for (const key of ['launched', 'settled', 'paidBets', 'grossReturns', 'freeProduction', 'factoryIncome', 'upgradeExpenses']) requireValid(integer(stats[key]), `statistique ${key}.`);
+  for (const key of ['launched', 'settled', 'paidBets', 'grossReturns', 'freeProduction', 'factoryIncome', 'upgradeExpenses', 'discardedUpgrades', 'downloadExpenses']) requireValid(integer(stats[key]), `statistique ${key}.`);
+  requireValid(integer(stats.recalibrationWithdrawn, -Number.MAX_SAFE_INTEGER), 'solde des recalibrages.');
+  requireValid(value.recalibrations > 0 || (stats.recalibrationWithdrawn === 0 && stats.discardedUpgrades === 0), 'recalibrage sans trace.');
+  requireValid(integer(value.instabilityBaseCents, 0, stats.grossReturns as number), 'faille.');
   requireValid(integer(stats.paidProfit, -Number.MAX_SAFE_INTEGER), 'bénéfice cumulé.');
   if (legacy) {
     requireValid((stats.factoryIncome as number) % 1500 === 0, 'anciens salaires.');
@@ -87,7 +120,7 @@ export function parseSnapshot(raw: string): GameState {
     requireValid(!Object.hasOwn(f, 'events'), 'événements dans un ancien format.');
     f.events = [];
   }
-  value.saveVersion = 6;
+  value.saveVersion = 8;
   requireValid(Array.isArray(f.events) && (f.events.length === 0 || f.events.length === 3), 'programme des événements.');
   for (let index = 0; index < f.events.length; index++) {
     const event = f.events[index];
@@ -117,10 +150,11 @@ export function parseSnapshot(raw: string): GameState {
   const s = value as unknown as GameState;
   requireValid(s.stats.launched === s.nextBallSequence - 1 && s.stats.settled === s.stats.launched - s.pendingBalls.length, 'compteurs de billes.');
   requireValid(s.history.length === Math.min(CONFIG.historyLimit, s.stats.settled), 'taille de l’historique.');
-  requireValid(s.walletCents === CONFIG.initialWallet + s.stats.grossReturns + s.stats.factoryIncome - s.stats.paidBets - s.stats.upgradeExpenses, 'bilan du solde.');
+  requireValid(s.walletCents === CONFIG.initialWallet + s.stats.grossReturns + s.stats.factoryIncome - s.stats.paidBets - s.stats.upgradeExpenses - s.stats.downloadExpenses - s.stats.recalibrationWithdrawn, 'bilan du solde.');
   const pendingBets = s.pendingBalls.reduce((sum, ball) => sum + ball.betCents, 0);
   requireValid(s.stats.paidBets >= pendingBets && s.stats.freeProduction <= s.stats.grossReturns && s.stats.paidProfit === s.stats.grossReturns - s.stats.freeProduction - (s.stats.paidBets - pendingBets), 'bilan des retours.');
-  requireValid(s.stats.upgradeExpenses === [...s.upgrades, ...s.plans].reduce((sum, id: UpgradeId) => sum + UPGRADES[id].price, 0), 'dépenses d’atelier.');
+  requireValid(s.stats.upgradeExpenses === [...s.upgrades, ...s.plans].reduce((sum, id: UpgradeId) => sum + UPGRADES[id].price, 0) + s.stats.discardedUpgrades, 'dépenses d’atelier.');
+  requireValid(s.stats.downloadExpenses === s.downloads.reduce((sum, id) => sum + DOWNLOADS[id].price, 0), 'dépenses de téléchargement.');
   requireValid(s.repairTriggered === (s.stats.grossReturns >= CONFIG.repairThreshold), 'seuil de panne.');
   requireValid(s.stats.factoryIncome % CONFIG.factoryGreyReward === 0, 'salaires.');
   requireValid(s.history.reduce((sum, ball) => sum + ball.returnCents, 0) <= s.stats.grossReturns, 'retours de l’historique.');

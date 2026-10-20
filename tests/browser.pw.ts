@@ -289,7 +289,7 @@ test('suppression d’une sauvegarde incompatible : confirmation indispensable e
   for (let i = 0; i < 5; i++) { await other.keyboard.press('Tab'); actions.add((await other.locator('#scene').getAttribute('data-focused-action'))!); }
   expect(actions.has('delete-save')).toBe(false); await other.close();
   await activate(page, 'delete-save'); await activate(page, 'confirm-delete'); await expect(page.locator('#scene')).toHaveAttribute('data-state', 'ready');
-  expect((await saved(page)).walletCents).toBe(1900); expect((await saved(page)).saveVersion).toBe(6);
+  expect((await saved(page)).walletCents).toBe(1900); expect((await saved(page)).saveVersion).toBe(8);
 });
 
 test('nouvelle partie : aucun ancien vol ne survit lorsque les identifiants recommencent', async ({ page }) => {
@@ -355,7 +355,9 @@ test('achats chez Azur : réparation et améliorations installées dès le paiem
   await use('plans-buy'); expect((await saved(page)).upgrades).toEqual(['azur.initial_repair', 'azur.auto_launcher']); expect((await saved(page)).plans).toEqual([]);
   await page.keyboard.press('ArrowRight'); await use('plans-buy'); const paid = await saved(page);
   expect(paid.upgrades).toEqual(['azur.initial_repair', 'azur.auto_launcher', 'azur.accounting_tray']); expect(paid.plans).toEqual([]); expect(paid.stats.upgradeExpenses).toBe(8000);
-  await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await expect(shop).toHaveAttribute('data-plan-page', '6');
+  // Pages 6 et 7 : Condensateur et Boîte, achetables ; la page 8 (module numérique) reste une étude.
+  for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight');
+  await expect(shop).toHaveAttribute('data-plan-page', '8');
   for (let i = 0; i < 7; i++) { await page.keyboard.press('Tab'); expect(await shop.getAttribute('data-focused-action')).not.toBe('plans-buy'); }
   // Échap ferme le carnet, puis rentre directement à la cave sans repasser par la boutique.
   await page.keyboard.press('Escape'); await expect(shop).toHaveAttribute('data-view', 'workshop');
@@ -365,6 +367,73 @@ test('achats chez Azur : réparation et améliorations installées dès le paiem
   await page.reload(); await expect(page.locator('#scene')).toHaveAttribute('data-state', 'ready');
   expect((await saved(page)).upgrades).toEqual(paid.upgrades); await expect(page.locator('#scene')).toHaveAttribute('data-modules', 'auto_launcher,accounting_tray');
   expect(await page.locator('button:visible,header:visible,aside:visible,dialog:visible').count()).toBe(0); expect(errors).toEqual([]);
+});
+
+test('Condensateur et Boîte de vitesses : modules visibles, levier au clavier, deux charges sans cumul et rafales', async ({ page }) => {
+  test.setTimeout(120000);
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  const game = equippedGame(); game.state.walletCents += 40000; game.state.stats.factoryIncome += 40000;
+  game.buyPlan('azur.capacitor'); game.buyPlan('azur.gearbox'); game.state.charges = 2; game.state.heatCount = 0;
+  await page.addInitScript(state => { if (!localStorage.getItem('masterplinko.save')) localStorage.setItem('masterplinko.save', JSON.stringify(state)); }, game.state);
+  await page.setViewportSize({ width: 1280, height: 720 }); await ready(page);
+  await expect(page.locator('#scene')).toHaveAttribute('data-modules', 'auto_launcher,accounting_tray,capacitor,gearbox');
+  // Levier physique au clavier : mode mémorisé dans la sauvegarde.
+  await activate(page, 'gear'); await expect.poll(async () => (await saved(page)).gearMode).toBe('burst');
+  // Deux charges : une par activation, aucune seconde activation pendant le bonus.
+  await activate(page, 'discharge');
+  let state = await saved(page); expect(state.charges).toBe(1); expect(state.bonusRemainingMs).toBeGreaterThan(0);
+  await activate(page, 'discharge'); expect((await saved(page)).charges).toBe(1);
+  // Rafale : trois billes rapprochées après la mise en marche du Doigt.
+  const before = (await saved(page)).stats.launched;
+  await activate(page, 'auto');
+  await expect.poll(async () => (await saved(page)).stats.launched - before, { timeout: 6000 }).toBeGreaterThanOrEqual(3);
+  state = await saved(page);
+  const autoBalls = state.pendingBalls.filter((ball: { origin: string }) => ball.origin === 'auto');
+  expect(autoBalls.length).toBeGreaterThanOrEqual(3); expect(autoBalls.every((ball: { bonus: number }) => ball.bonus === 2)).toBe(true);
+  await activate(page, 'auto');
+  await view(page, 'c', 'commandes');
+  await page.mouse.move(1278, 718); await page.screenshot({ path: 'test-results/plinko-condensateur-boite.png' });
+  await page.reload(); await expect(page.locator('#scene')).toHaveAttribute('data-state', 'ready');
+  const resumed = await saved(page); expect(resumed.gearMode).toBe('burst'); expect(resumed.saveVersion).toBe(8); expect(resumed.charges).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test('faille et recalibrage : récapitulatif, annulation, confirmation, module numérique et téléchargement', async ({ page }) => {
+  test.setTimeout(150000);
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  const game = equippedGame(); game.state.walletCents += 60000; game.state.stats.factoryIncome += 60000;
+  game.buyPlan('azur.duplicator');
+  // Retours bruts cohérents avec le bilan : la faille est pleine.
+  game.state.stats.grossReturns += 100000; game.state.stats.freeProduction += 100000; game.state.walletCents += 100000;
+  await page.addInitScript(state => { if (!localStorage.getItem('masterplinko.save')) localStorage.setItem('masterplinko.save', JSON.stringify(state)); }, game.state);
+  await page.setViewportSize({ width: 1280, height: 720 }); await ready(page);
+  await expect(page.locator('#scene')).toHaveAttribute('data-modules', 'auto_launcher,accounting_tray,duplicator,instability_counter');
+  await page.mouse.move(1278, 718); await page.screenshot({ path: 'test-results/plinko-duplicateur-faille.png' });
+  const before = await saved(page);
+  await activate(page, 'recalibrate'); await expect(page.locator('#scene')).toHaveAttribute('data-rendered-view', 'instabilite');
+  await page.mouse.move(1278, 718); await page.screenshot({ path: 'test-results/faille-recapitulatif.png' });
+  // Échap annule : rien n’est retiré (seul l’horodatage de sauvegarde peut changer).
+  await page.keyboard.press('Escape');
+  { const kept = await saved(page); expect([kept.walletCents, kept.upgrades, kept.recalibrations]).toEqual([before.walletCents, before.upgrades, 0]); }
+  await activate(page, 'recalibrate'); await activate(page, 'recalibrate-confirm');
+  await expect.poll(async () => (await saved(page)).recalibrations).toBe(1);
+  const after = await saved(page);
+  expect(after.walletCents).toBe(1900); expect(after.upgrades).toEqual(['azur.initial_repair']); expect(after.history).toEqual(before.history); expect(after.saveVersion).toBe(8);
+  await expect(page.locator('#scene')).toHaveAttribute('data-modules', 'digital');
+  await activate(page, 'numerique'); await expect(page.locator('#scene')).toHaveAttribute('data-rendered-view', 'numerique');
+  await page.mouse.move(1278, 718); await page.screenshot({ path: 'test-results/module-numerique.png' });
+  // 19 pièces : la Mémoire de mise (30) n’est pas encore téléchargeable.
+  for (let i = 0; i < 45; i++) { await page.keyboard.press('Tab'); expect(await page.locator('#scene').getAttribute('data-focused-action')).not.toBe('dl-buy'); }
+  // Ajouter un salaire cohérent puis recharger : téléchargement unique et conservé.
+  await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('masterplinko.save')!); s.walletCents += 5000; s.stats.factoryIncome += 5000; localStorage.setItem('masterplinko.save', JSON.stringify(s)); });
+  await page.reload(); await expect(page.locator('#scene')).toHaveAttribute('data-state', 'ready');
+  await expect(page.locator('#scene')).toHaveAttribute('data-rendered-view', 'plinko', { timeout: 30000 });
+  await activate(page, 'numerique'); await activate(page, 'dl-buy');
+  await expect.poll(async () => (await saved(page)).downloads).toEqual(['download.bet_memory']);
+  expect((await saved(page)).walletCents).toBe(1900 + 5000 - 3000);
+  await page.reload(); await expect(page.locator('#scene')).toHaveAttribute('data-state', 'ready');
+  expect((await saved(page)).downloads).toEqual(['download.bet_memory']);
+  expect(errors).toEqual([]);
 });
 
 test('plans achetés : Aimants à 200, Collecteur à 120 et fonctionnement sans essai DEV', async ({ page }) => {
@@ -471,7 +540,7 @@ test('départ avec une bille en vol : réglée une fois au retour figé, fondu r
   test.setTimeout(120000);
   await page.addInitScript(() => { Math.random = () => 0.5; });
   const game = equippedGame(); game.toggleAuto();
-  while (!game.state.chargeReady) game.settle(game.launch('auto')!.id);
+  while (!game.state.charges) game.settle(game.launch('auto')!.id);
   game.activateBonus();
   await page.addInitScript(state => { if (!localStorage.getItem('masterplinko.save')) localStorage.setItem('masterplinko.save', JSON.stringify(state)); }, game.state);
   await ready(page); await activate(page, 'launch');
@@ -529,7 +598,7 @@ test('boutique : visite masquée avant la rencontre, sans contournement par la d
 test('boutique publique : visite explicite, objets au clavier, horloges figées et sauvegarde préservée', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const game = equippedGame();
-  while (!game.state.chargeReady) game.settle(game.launch('manual')!.id), game.advance(500);
+  while (!game.state.charges) game.settle(game.launch('manual')!.id), game.advance(500);
   game.activateBonus(); game.setPreferences({ quality: 'normal' });
   await page.addInitScript(state => { if (!localStorage.getItem('masterplinko.save')) localStorage.setItem('masterplinko.save', JSON.stringify(state)); }, game.state);
   await page.setViewportSize({ width: 1820, height: 864 }); await ready(page); await page.keyboard.press('s');
@@ -573,7 +642,7 @@ test('boutique publique : visite explicite, objets au clavier, horloges figées 
   await page.reload(); await expect(page.locator('#scene')).toHaveAttribute('data-state', 'ready');
   await expect(page.locator('#app')).toHaveAttribute('data-departure', 'cave');
   const resumed = await saved(page); expect(resumed.walletCents).toBe(before.walletCents); expect(resumed.upgrades).toEqual(before.upgrades);
-  expect(resumed.history).toEqual(before.history); expect(resumed.saveVersion).toBe(6); expect(resumed.factoryRemainingMs).toBe(0);
+  expect(resumed.history).toEqual(before.history); expect(resumed.saveVersion).toBe(8); expect(resumed.factoryRemainingMs).toBe(0);
   expect(errors).toEqual([]);
 });
 
@@ -663,7 +732,7 @@ test('atelier caché : réparation requise, radio, prototypes décoratifs et ret
   await shopAction('go-home'); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'cave', { timeout: 16000 });
   expect(await saved(page)).toEqual(before);
   await page.reload(); await expect(page.locator('#scene')).toHaveAttribute('data-state', 'ready'); await expect(page.locator('#app')).toHaveAttribute('data-departure', 'cave');
-  const resumed = await saved(page); expect(resumed.walletCents).toBe(before.walletCents); expect(resumed.upgrades).toEqual(before.upgrades); expect(resumed.history).toEqual(before.history); expect(resumed.saveVersion).toBe(6);
+  const resumed = await saved(page); expect(resumed.walletCents).toBe(before.walletCents); expect(resumed.upgrades).toEqual(before.upgrades); expect(resumed.history).toEqual(before.history); expect(resumed.saveVersion).toBe(8);
   expect(errors).toEqual([]);
 });
 

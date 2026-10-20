@@ -1,7 +1,9 @@
 import './style.css';
 import { CONFIG, VIEWS } from './config';
 import { Game, reconcile } from './game/engine';
-import { newGame } from './game/state';
+import { digitalModule, newGame } from './game/state';
+import { recalibrationIssue } from './game/plans';
+import { DOWNLOAD_IDS } from './rendering/rift';
 import type { GameState } from './game/state';
 import { parseSnapshot, writeSnapshot } from './persistence/snapshot';
 import { claimWriter } from './persistence/ownership';
@@ -32,7 +34,9 @@ let awaitingDelete = false;
 let importing = false, importGeneration = 0;
 let acquired = false, waiting = false;
 let loaded = false;
-let historyPage = 0;
+let historyPage = 0, downloadPage = 0;
+/** Récapitulatif du recalibrage affiché sur le compteur, en attente de confirmation. */
+let awaitingRecalibration = false;
 const sound = new Sound();
 const navigation = new Navigation();
 const departure = new Departure();
@@ -81,6 +85,9 @@ function resumeLocation() {
 function navigate(view: View) {
   if (!departure.inCave) return;
   if (awaitingDelete && view !== 'reglages') { message = 'Confirmez ou annulez la suppression sur le boîtier.'; render(); return; }
+  if (awaitingRecalibration && view !== 'instabilite') { message = 'Confirmez ou annulez le recalibrage sur le compteur.'; render(); return; }
+  if (view === 'numerique' && !digitalModule(game.state)) return;
+  if (view === 'instabilite' && !game.state.upgrades.includes('azur.duplicator')) return;
   if ((awaitingImport || importing) && view !== 'reglages') { message = 'Terminez ou annulez l’import sur le boîtier.'; return; }
   if (view === 'historique' && !game.state.upgrades.includes('azur.accounting_tray')) { message = 'Le Bac comptable s’achète chez Azur ; il est installé dès l’achat.'; return; }
   if (view === 'collecteur' && !game.collectorAvailable) return;
@@ -122,7 +129,7 @@ void claimWriter(async () => { acquired = true; await load(); }, () => {
 
 function render() {
   const info = awaitingDelete ? game.error || message || 'Supprimer la sauvegarde ? La progression sera effacée. Confirmez ou annulez sur le boîtier.' : awaitingImport ? `Fichier validé : ${money(awaitingImport.walletCents)} pièces. Remplacer la partie ? Confirmer ou annuler sur le boîtier.` : waiting ? 'Partie déjà ouverte ailleurs. Fermez l’autre onglet pour jouer ici.' : bootProblem ? message || `${bootProblem} Données conservées. Exportez-les ou importez un fichier valide.` : game.error || message || game.notice;
-  scene?.setInterface({ canWrite: game.writable && !game.error && !bootProblem && !renderingError, canManageSave: acquired && !waiting, recovery: !!(bootProblem || game.error), confirmDelete: awaitingDelete, importing, autoEnabled: game.autoEnabled, magnetsAvailable: game.magnetsAvailable, collectorAvailable: game.collectorAvailable, message: info, historyPage, importWallet: awaitingImport?.walletCents });
+  scene?.setInterface({ canWrite: game.writable && !game.error && !bootProblem && !renderingError, canManageSave: acquired && !waiting, recovery: !!(bootProblem || game.error), confirmDelete: awaitingDelete, importing, autoEnabled: game.autoEnabled, magnetsAvailable: game.magnetsAvailable, collectorAvailable: game.collectorAvailable, message: info, historyPage, downloadPage, confirmRecalibration: awaitingRecalibration, importWallet: awaitingImport?.walletCents });
   document.getElementById('app')!.dataset.view = navigation.target;
   document.getElementById('app')!.dataset.moving = String(navigation.moving);
   document.getElementById('app')!.dataset.departure = departure.phase;
@@ -192,6 +199,7 @@ function exportSave() {
 function action(command: string) {
   if (!departure.inCave) return;
   if (awaitingDelete && !['confirm-delete', 'cancel-delete', 'export'].includes(command)) return;
+  if (awaitingRecalibration && !['recalibrate-confirm', 'recalibrate-cancel'].includes(command)) return;
   if (command === 'sorties') { leaveCave(); return; }
   if (command === 'magnets-inspect' && game.magnetsAvailable) { navigate('commandes'); return; }
   if (Object.hasOwn(VIEWS, command)) { navigate(command as View); return; }
@@ -200,6 +208,13 @@ function action(command: string) {
   else if (command === 'history-next') historyPage = Math.min(Math.max(0, Math.ceil(game.state.history.length / 7) - 1), historyPage + 1);
   else if (command === 'export') exportSave();
   else if (command === 'delete-save' && acquired && !waiting && !importing && !awaitingImport && !navigation.moving && navigation.target === 'reglages') awaitingDelete = true;
+  else if (command === 'recalibrate-cancel') { awaitingRecalibration = false; message = 'Recalibrage annulé. Partie conservée.'; navigation.go('instabilite', game.state.preferences.reducedMotion); }
+  else if (command === 'recalibrate-confirm' && awaitingRecalibration) {
+    awaitingRecalibration = false;
+    if (game.recalibrate()) { scene?.resetFlights(); historyPage = 0; downloadPage = 0; message = game.notice; navigation.go('plinko', game.state.preferences.reducedMotion); sound.unlock(game.state.preferences.sound); sound.play('purchase', game.state.preferences.sound); }
+    else message = game.error || game.notice;
+  }
+  else if ((command === 'dl-prev' || command === 'dl-next') && navigation.target === 'numerique' && !navigation.moving) downloadPage = Math.max(0, Math.min(DOWNLOAD_IDS.length - 1, downloadPage + (command === 'dl-next' ? 1 : -1)));
   else if (command === 'cancel-delete') { awaitingDelete = false; message = 'Suppression annulée. Partie actuelle conservée.'; }
   else if (command === 'confirm-delete' && awaitingDelete && acquired && !waiting && !document.hidden) {
     game.writable = true;
@@ -229,6 +244,15 @@ function action(command: string) {
       if (navigation.atMachine && !s.factoryRemainingMs) game.setBet(s.selectedBetCents + (command === 'bet-up' ? 100 : -100));
     } else if (command === 'auto' && navigation.atMachine) game.toggleAuto();
     else if (command === 'discharge' && navigation.atMachine) game.activateBonus();
+    else if (command === 'gear' && navigation.atMachine) game.setGear(s.gearMode === 'burst' ? 'steady' : 'burst');
+    else if (command === 'recalibrate' && !navigation.moving) {
+      // Le récapitulatif perdu / conservé / gagné s’affiche d’abord sur le compteur.
+      const issue = recalibrationIssue(s);
+      if (issue) message = issue; else { awaitingRecalibration = true; navigation.go('instabilite', s.preferences.reducedMotion); }
+    } else if (command === 'dl-buy' && navigation.target === 'numerique' && !navigation.moving) {
+      if (game.buyDownload(DOWNLOAD_IDS[downloadPage])) { sound.unlock(s.preferences.sound); sound.play('purchase', s.preferences.sound); }
+      message = game.notice;
+    }
   }
   scene?.clearFocus();
   render();
@@ -264,7 +288,7 @@ document.addEventListener('keydown', event => {
   }
   const shortcuts: Record<string, View> = { m: 'plinko', c: 'commandes', a: 'azur', r: 'reglages', h: 'historique' };
   if (event.key === 'Escape') {
-    event.preventDefault(); if (awaitingDelete) action('cancel-delete'); else if (awaitingImport || importing) action('cancel-import'); else navigate('plinko');
+    event.preventDefault(); if (awaitingDelete) action('cancel-delete'); else if (awaitingRecalibration) action('recalibrate-cancel'); else if (awaitingImport || importing) action('cancel-import'); else navigate('plinko');
   } else if (key === 's') { event.preventDefault(); leaveCave(); }
   else if (shortcuts[key]) { event.preventDefault(); navigate(shortcuts[key]); }
   else if (event.code === 'Space' && navigation.atMachine) { event.preventDefault(); action('launch'); }
@@ -275,7 +299,7 @@ document.addEventListener('keydown', event => {
 let lastTime = performance.now();
 function frame(now: number) {
   const delta = Math.min(1000, Math.max(0, now - lastTime)); lastTime = now;
-  const blocking = navigation.target === 'reglages' || navigation.target === 'historique' || !!awaitingImport || importing || awaitingDelete;
+  const blocking = navigation.target === 'reglages' || navigation.target === 'historique' || !!awaitingImport || importing || awaitingDelete || awaitingRecalibration;
   const available = !document.hidden && game.writable && !game.error && !bootProblem && !renderingError;
   const active = available && !blocking && departure.inCave;
   game.advance(delta, departure.phase === 'working' ? available : active, departure.phase === 'working' ? 'factory' : 'all');

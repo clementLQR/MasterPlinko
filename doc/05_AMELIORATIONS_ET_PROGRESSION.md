@@ -25,11 +25,11 @@ Chaque achat est atomique, unique et installe le module ; les plans payés non m
 | Bac comptable | Afficher résultats et bénéfices |
 | Aimants | Attirer une bille automatique vers une case voisine plus avantageuse après une recharge de 5 secondes ; décalage d’une seule case, aucun effet sur ×40 ; plan achetable à 200 pièces, réparation et Doigt installés requis |
 | Collecteur de ratés | Dix sorties sous ×1 de billes manuelles/Doigt offrent une bille gratuite de base 1 ; plan achetable à 120 pièces, réparation installée requise |
-| Condensateur de poche | Conserver une deuxième charge de Décharge pour l’utiliser plus tard ; concept retenu, non implémenté |
-| Boîte de vitesses | Choisir entre lancements réguliers et petites rafales du Doigt, avec la même production moyenne ; concept retenu, non implémenté |
-| Module numérique | Donner accès aux améliorations téléchargeables à installer sur le Plinko ; module futur demandé, non implémenté |
+| Condensateur de poche | 150 pièces après réparation : jusqu’à deux charges de Décharge stockées ; implémenté (MP-041) |
+| Boîte de vitesses | 100 pièces avec le Doigt : régulier (1 bille / 2 s) ou rafales (3 billes / 6 s), même production moyenne ; implémentée (MP-042) |
+| Module numérique | Offert au premier recalibrage ; terminal de téléchargements permanents payés en pièces ; implémenté (MP-044) |
 | Module de billes spéciales | Débloquer une famille de billes |
-| Duplicateur à restitution incertaine | Dupliquer certains gains et faire apparaître des résidus |
+| Duplicateur | 300 pièces : une bille sur 20 finissant sur un gain est payée deux fois ; ouvre la faille du recalibrage ; résidus encore à venir |
 | Compteur d'instabilité | Rendre lisible la préparation du recalibrage |
 
 Le compteur d'instabilité remplace la proposition initiale de mesure d'addiction : il relie mieux le système au mystère.
@@ -54,7 +54,7 @@ Extension additive du format 3 : `magnetCooldownMs`, borné de 0 à 5 000, et `m
 **Impact théorique de l’essai**, hors Surchauffe, avec le Doigt actuel, sans arrêt ni plafond : la production moyenne passe d’environ 0,5975 à **0,7618 pièce par bille gratuite**, soit environ +27,5 %. Ce calcul tient compte des deux billes ordinaires entre les activations et de l’activation conservée sur ×40. Ce n’est pas un taux de retour sur une mise payée ; les billes manuelles et leurs poids restent inchangés. Le rythme réel reste à évaluer en jouant.
 
 ### Trois améliorations supplémentaires retenues
-Le créateur retient ces trois concepts. Le Collecteur dispose de l’essai de développement détaillé ci-dessous ; le Condensateur et la Boîte restent à concevoir.
+Le créateur retient ces trois concepts ; le Collecteur, le Condensateur et la Boîte sont implémentés. Réglages du Condensateur et de la Boîte choisis par le créateur le 20 octobre 2026.
 
 | Amélioration | Effet retenu | Support envisagé |
 | --- | --- | --- |
@@ -62,7 +62,13 @@ Le créateur retient ces trois concepts. Le Collecteur dispose de l’essai de d
 | Condensateur de poche | Stocker jusqu’à deux charges de Décharge, pour choisir le moment de leur utilisation. | Condensateur avec deux voyants de charge |
 | Boîte de vitesses | Régler le Doigt sur un rythme régulier ou de petites rafales, sans augmenter sa production moyenne. | Levier mécanique de sélection du rythme |
 
-Les supports appartiennent aux objets 3D sans HUD. Le Condensateur augmente le stockage, sans décision d’augmenter le facteur ×2 ou de cumuler les bonus. La Boîte de vitesses change la répartition des lancements dans le temps ; leurs paramètres restent à préciser. Suivi MP-040 à MP-042.
+Les supports appartiennent aux objets 3D sans HUD.
+
+**Condensateur de poche** (`azur.capacitor`, **150 pièces**, réglage choisi par le créateur le 20 octobre 2026) : vendu chez Azur après la réparation, installé dès l’achat. La Surchauffe stocke jusqu’à **deux charges** de Décharge : une fois la première prête, le comptage continue vers la seconde (100 règlements par charge). Chaque activation consomme une charge pour ×2 pendant 10 s ; pendant un bonus, ni comptage ni seconde activation : aucun cumul, facteur inchangé. La progression vers la charge suivante est conservée à l’activation. Deux voyants sur un boîtier lavande à gauche du bouton de Décharge, aucun HUD.
+
+**Boîte de vitesses** (`azur.gearbox`, **100 pièces**, réglage choisi par le créateur le 20 octobre 2026) : vendue chez Azur avec le Doigt installé, installée dès l’achat. Levier physique à deux positions sur la machine : **régulier** (une bille toutes les 2 s) ou **rafale** (3 billes à 0,25 s d’écart toutes les 6 s), soit 0,5 bille/s dans les deux cas. Première bille 2 s après la mise en marche ; le changement de mode fait repartir la cadence de zéro. Au plafond de 50, une bille de rafale refusée est sautée, jamais mise en file. Mode `gearMode` sauvegardé ; aimants, Collecteur et Décharge inchangés.
+
+Impact : le Condensateur ne change pas le retour moyen ; il permet de garder une charge pour un moment choisi. La Boîte ne change pas la production moyenne. Suivi MP-040 à MP-042.
 
 ### Collecteur de ratés — règles et acquisition
 Le créateur approuve : **10 billes terminant sous ×1 remplissent le réservoir**, puis une **bille gratuite de base 1 pièce** est offerte. Les manuelles et celles du Doigt contribuent ; les billes du Collecteur ne le rechargent jamais. Conserver **une seule récompense en attente** si les 50 places sont occupées. **Prix fixé par le créateur : 120 pièces.** Acheter le plan `azur.collector` dans le carnet d’Azur après réparation installée, puis le monter sur le Plinko sans nouveau débit ; Doigt facultatif. Actif aussi en production. Prêt DEV facultatif conservé via `VITE_COLLECTOR_TRIAL=1` avec garde DEV. Les deux essais Collecteur/aimants sont indépendants et peuvent coexister.
@@ -92,7 +98,7 @@ Le futur contrat devra conserver un résultat déterminé au lancement, les pass
 Définir des limites pour éviter un nombre ingérable de billes et d'effets.
 
 ### Module numérique et améliorations téléchargeables
-**Choix confirmé par le créateur :** prévoir un **module numérique** donnant accès à des **améliorations téléchargeables**, installables sur le Plinko. Ce module ouvre la branche logicielle des améliorations ; la liste des téléchargements et leurs effets restent à concevoir.
+**Module numérique** (MP-044) : offert par le premier recalibrage, terminal mural à droite de la machine avec cadrage `numerique`. On y feuillette le catalogue et on télécharge instantanément en payant en pièces : **seule exception** validée par le créateur à la règle « aucune vente dans la cave ». Téléchargements permanents, conservés aux recalibrages : **Mémoire de mise** (30 pièces : la mise descend au plus haut possible quand le solde manque, puis revient à la mise choisie), **Décharge auto** (60 : activation dès qu’une charge est prête, tant que le Doigt tourne), **Aimants 2.0** (120 : recharge 4 s au lieu de 5, Aimants installés requis à l’achat), **Surchauffe rapide** (150 : une charge en 80 billes au lieu de 100, ×2 et durée inchangés).
 
 Support envisagé : boîtier électronique avec petit écran à pixels et boutons physiques, dans le style crème/pastel d’Azur. Le catalogue des téléchargements appartient à ce support 3D, avec indications au survol/focus, sans HUD. Forme et emplacement définitifs restent à préciser.
 
@@ -126,6 +132,12 @@ Ces effets sont à concevoir : les noms ne constituent pas des règles finalisé
 Créer des compromis pour éviter que tous les objets soient de simples multiplicateurs cumulables.
 
 ## Recalibrage
+**Duplicateur** (`azur.duplicator`, **300 pièces**, décision du créateur du 20 octobre 2026) : vendu chez Azur après la réparation (page 9 du carnet), installé dès l’achat, armoire au pied gauche de la machine. Une bille sur 20 finissant sur ×1,5 ou plus est **payée deux fois** ; le tirage est fait au lancement avec le résultat (champ `duplicated`, retour figé doublé), jamais après. Il **ouvre une faille spatio-temporelle** : le Compteur d’instabilité apparaît et se remplit avec **1 000 pièces de retours bruts du Plinko** depuis l’achat.
+
+**Recalibrage, première version** (décision du créateur du 20 octobre 2026) : possible quand la faille est pleine, sans bille en vol, bonus en cours ni service. Le bouton RECALIBRER du compteur affiche d’abord sur son écran ce qui est **perdu** (solde ramené à 19 pièces, améliorations sauf la réparation, Surchauffe, réservoir du Collecteur, mise et rythme du Doigt), **conservé** (réparation et accès à Azur, historique du Bac, statistiques cumulées, réglages, téléchargements) et **gagné** (au premier recalibrage, le module numérique offert). Confirmer ou annuler (Échap) ; le temps de jeu est suspendu pendant la décision. Le Duplicateur est perdu : il faut le racheter pour rouvrir la faille. Pas d’Échos pour l’instant.
+
+La suite (Échos, permanents, lien avec l’histoire) reste la vision ci-dessous.
+
 La machine est réinitialisée mais conserve des Échos des événements possibles.
 
 **Réinitialisé, proposition :** pièces, niveaux ordinaires, production de la session.

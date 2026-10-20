@@ -1,10 +1,10 @@
-import { CONFIG, EXITS, UPGRADES } from '../config';
-import type { UpgradeId } from '../config';
-import { drawOutcome } from './outcomes';
+import { CONFIG, DOWNLOADS, EXITS, UPGRADES } from '../config';
+import type { DownloadId, UpgradeId } from '../config';
+import { drawOutcome, randomUnit } from './outcomes';
 import { magnetExit } from './magnets';
-import { purchaseIssue } from './plans';
+import { downloadIssue, purchaseIssue, recalibrationIssue } from './plans';
 import type { Random } from './outcomes';
-import { isBroken, newGame } from './state';
+import { chargeCapacity, hasDownload, heatThreshold, isBroken, magnetRecharge, newGame } from './state';
 import { advanceFactory, factoryReward, newFactory, planFactoryEvents } from './packing';
 import type { Ball, GameState, Preferences, Result } from './state';
 
@@ -23,12 +23,20 @@ export function settleInto(state: GameState, id: string): Result | undefined {
   state.history.unshift(result);
   state.history = state.history.slice(0, CONFIG.historyLimit);
   if (ball.collectorEligible && ball.origin !== 'collector' && ball.multiplier < 100) state.collectorCharge = Math.min(CONFIG.collectorThreshold, state.collectorCharge + 1);
-  if (state.bonusRemainingMs === 0 && !state.chargeReady) {
-    state.heatCount = Math.min(CONFIG.chargeCount, state.heatCount + 1);
-    state.chargeReady = state.heatCount === CONFIG.chargeCount;
+  // Surchauffe : aucun comptage pendant le bonus ni lorsque toutes les charges sont prêtes.
+  if (state.bonusRemainingMs === 0 && state.charges < chargeCapacity(state)) {
+    state.heatCount++;
+    if (state.heatCount >= heatThreshold(state)) { state.charges++; state.heatCount = 0; }
   }
   if (!state.repairTriggered && state.stats.grossReturns >= CONFIG.repairThreshold) state.repairTriggered = true;
   return result;
+}
+
+/** Mémoire de mise : la mise suit le solde vers le bas, puis revient à la mise choisie. */
+export function applyBetMemory(state: GameState): void {
+  if (!hasDownload(state, 'download.bet_memory')) return;
+  const affordable = Math.floor(state.walletCents / 100) * 100;
+  state.selectedBetCents = Math.max(CONFIG.minBet, Math.min(state.preferredBetCents, affordable));
 }
 
 export function reconcile(state: GameState): { state: GameState; count: number; total: number } {
@@ -45,6 +53,8 @@ export class Game {
   notice = '';
   writable = false;
   private autoElapsed = 0;
+  /** Rang du prochain lancement du Doigt dans le cycle de rafale. */
+  private autoStep = 0;
   private checkpointElapsed = 0;
   private fractionalMs = 0;
   constructor(state: GameState, private save: Save, private random: Random = Math.random, private options: { magnetsTrial?: boolean; collectorTrial?: boolean } = {}) { this.state = structuredClone(state); }
@@ -56,6 +66,7 @@ export class Game {
     if (!this.available()) return false;
     try {
       if (!Number.isSafeInteger(next.walletCents) || next.walletCents < 0 || Object.values(next.stats).some(value => !Number.isSafeInteger(value))) throw new Error('Limite numérique atteinte.');
+      applyBetMemory(next);
       next.savedAt = new Date().toISOString();
       this.save(next);
       this.state = next;
@@ -101,8 +112,11 @@ export class Game {
     const multiplier = EXITS[exit];
     const baseCents = origin === 'manual' ? betCents : 100;
     const bonus = s.bonusRemainingMs > 0 ? CONFIG.bonusFactor : 1;
-    const ball: Ball = { id: `ball-${s.nextBallSequence}`, sequence: s.nextBallSequence, origin, betCents, baseCents, multiplier, exit, bonus, returnCents: Math.round(baseCents * multiplier / 100) * bonus };
+    // Duplicateur : tiré au lancement avec le résultat, seulement pour une sortie sur un gain.
+    const duplicated = s.upgrades.includes('azur.duplicator') && multiplier >= CONFIG.duplicateMinMultiplier && randomUnit(this.random) < CONFIG.duplicateChance;
+    const ball: Ball = { id: `ball-${s.nextBallSequence}`, sequence: s.nextBallSequence, origin, betCents, baseCents, multiplier, exit, bonus, returnCents: Math.round(baseCents * multiplier / 100) * bonus * (duplicated ? 2 : 1) };
     if (exit !== drawn.exit) ball.magnetFrom = drawn.exit;
+    if (duplicated) ball.duplicated = true;
     if (origin !== 'collector' && this.collectorAvailable) ball.collectorEligible = true;
     const next = structuredClone(s);
     next.walletCents -= betCents;
@@ -110,7 +124,7 @@ export class Game {
     next.stats.launched++;
     next.stats.paidBets += betCents;
     next.pendingBalls.push(ball);
-    if (ball.magnetFrom !== undefined) next.magnetCooldownMs = CONFIG.magnetRecharge;
+    if (ball.magnetFrom !== undefined) next.magnetCooldownMs = magnetRecharge(s);
     if (origin === 'collector') next.collectorCharge = 0;
     if (origin === 'manual') next.manualCooldownMs = CONFIG.manualInterval;
     if (!this.commit(next)) return;
@@ -129,7 +143,7 @@ export class Game {
 
   setBet(bet: number): boolean {
     if (!this.available() || !Number.isInteger(bet) || bet < CONFIG.minBet || bet > CONFIG.maxBet || bet % 100 !== 0) return false;
-    return this.commit({ ...structuredClone(this.state), selectedBetCents: bet });
+    return this.commit({ ...structuredClone(this.state), selectedBetCents: bet, preferredBetCents: bet });
   }
 
   buyPlan(id: UpgradeId): boolean {
@@ -144,8 +158,53 @@ export class Game {
     next.stats.upgradeExpenses += item.price;
     next.upgrades.push(id);
     if (id === 'azur.initial_repair') next.repairPurchased = true;
+    // Le Duplicateur ouvre la faille : le Compteur d’instabilité part de zéro.
+    if (id === 'azur.duplicator') next.instabilityBaseCents = next.stats.grossReturns;
     if (!this.commit(next)) return false;
     this.notice = id === 'azur.initial_repair' ? '« Normalement, ça tient. » — Azur. Machine réparée, atelier privé accessible.' : `${item.name} installé par Azur. Il fonctionne dès le retour dans la cave.`;
+    return true;
+  }
+
+  /** Achat instantané sur l’écran du module numérique ; permanent, recalibrages compris. */
+  buyDownload(id: DownloadId): boolean {
+    const s = this.state;
+    if (!this.available() || !Object.hasOwn(DOWNLOADS, id)) return false;
+    const issue = downloadIssue(s, id);
+    if (issue) { this.notice = issue; return false; }
+    const item = DOWNLOADS[id], next = structuredClone(s);
+    next.walletCents -= item.price; next.stats.downloadExpenses += item.price; next.downloads.push(id);
+    // Effets immédiats et cohérents : jauge déjà au-delà de 80, recharge des aimants raccourcie.
+    if (id === 'download.fast_heat' && next.heatCount >= CONFIG.fastHeatCount) { if (next.charges < chargeCapacity(next) && next.bonusRemainingMs === 0) next.charges++; next.heatCount = 0; }
+    if (id === 'download.magnets_v2') next.magnetCooldownMs = Math.min(next.magnetCooldownMs, CONFIG.magnetRechargeFast);
+    if (!this.commit(next)) return false;
+    this.notice = `${item.name} téléchargé et installé.`;
+    return true;
+  }
+
+  /**
+   * Recalibrage : solde ramené à 19 pièces, améliorations retirées sauf la réparation, Surchauffe,
+   * Collecteur et réglages du Doigt remis à zéro. Conservés : historique, statistiques cumulées,
+   * réglages et téléchargements. Le premier offre le module numérique.
+   */
+  recalibrate(): boolean {
+    const s = this.state;
+    if (!this.available()) return false;
+    const issue = recalibrationIssue(s);
+    if (issue) { this.notice = issue; return false; }
+    const next = structuredClone(s), removed = s.upgrades.filter(id => id !== 'azur.initial_repair');
+    next.stats.recalibrationWithdrawn += s.walletCents - CONFIG.initialWallet;
+    next.stats.discardedUpgrades += removed.reduce((sum, id) => sum + UPGRADES[id].price, 0);
+    next.walletCents = CONFIG.initialWallet;
+    next.upgrades = ['azur.initial_repair']; next.plans = [];
+    next.charges = 0; next.heatCount = 0; next.bonusRemainingMs = 0; next.collectorCharge = 0;
+    next.magnetCooldownMs = CONFIG.magnetRecharge; next.gearMode = 'steady'; next.manualCooldownMs = 0;
+    next.selectedBetCents = CONFIG.minBet; next.preferredBetCents = CONFIG.minBet;
+    next.recalibrations++; next.instabilityBaseCents = next.stats.grossReturns;
+    if (!this.commit(next)) return false;
+    this.stopAuto();
+    this.notice = next.recalibrations === 1
+      ? 'Recalibrage effectué. La faille s’est refermée en laissant un module numérique sur la machine.'
+      : 'Recalibrage effectué. 19,00 pièces, réparation et téléchargements conservés.';
     return true;
   }
 
@@ -162,11 +221,27 @@ export class Game {
   toggleAuto(): boolean {
     if (!this.available() || !this.state.upgrades.includes('azur.auto_launcher') || isBroken(this.state) || this.state.factoryRemainingMs > 0) return false;
     this.autoEnabled = !this.autoEnabled;
-    this.autoElapsed = 0;
+    this.autoElapsed = 0; this.autoStep = 0;
     return true;
   }
 
-  stopAuto(): void { this.autoEnabled = false; this.autoElapsed = 0; }
+  stopAuto(): void { this.autoEnabled = false; this.autoElapsed = 0; this.autoStep = 0; }
+
+  /** Délai avant le prochain lancement du Doigt : 2 s, ou rafales de 3 billes toutes les 6 s. */
+  private autoInterval(): number {
+    if (this.state.gearMode !== 'burst' || !this.state.upgrades.includes('azur.gearbox')) return CONFIG.autoInterval;
+    if (this.autoStep % CONFIG.burstSize !== 0) return CONFIG.burstSpacing;
+    return this.autoStep === 0 ? CONFIG.autoInterval : CONFIG.burstCycle - (CONFIG.burstSize - 1) * CONFIG.burstSpacing;
+  }
+
+  /** Levier de la Boîte de vitesses ; le rythme repart de zéro au changement. */
+  setGear(mode: GameState['gearMode']): boolean {
+    const s = this.state;
+    if (!this.available() || !s.upgrades.includes('azur.gearbox') || s.factoryRemainingMs > 0 || s.gearMode === mode) return false;
+    if (!this.commit({ ...structuredClone(s), gearMode: mode })) return false;
+    this.autoElapsed = 0; this.autoStep = 0;
+    return true;
+  }
 
   startFactory(): boolean {
     this.stopAuto();
@@ -200,10 +275,10 @@ export class Game {
 
   activateBonus(): boolean {
     const s = this.state;
-    if (!this.available() || !s.chargeReady || s.bonusRemainingMs > 0 || isBroken(s) || s.factoryRemainingMs > 0) return false;
+    // Une charge par activation, jamais pendant un bonus en cours : ×2 sans cumul.
+    if (!this.available() || s.charges < 1 || s.bonusRemainingMs > 0 || isBroken(s) || s.factoryRemainingMs > 0) return false;
     const next = structuredClone(s);
-    next.chargeReady = false;
-    next.heatCount = 0;
+    next.charges--;
     next.bonusRemainingMs = CONFIG.bonusDuration;
     return this.commit(next);
   }
@@ -242,12 +317,20 @@ export class Game {
       this.launch('collector');
       if (this.error) return;
     }
+    // Décharge auto : déclenchée dès qu’une charge est prête, tant que le Doigt tourne.
+    if (clock === 'all' && this.autoEnabled && hasDownload(this.state, 'download.auto_discharge') && this.state.charges > 0 && this.state.bonusRemainingMs === 0 && !isBroken(this.state) && this.state.factoryRemainingMs === 0) {
+      this.activateBonus();
+      if (this.error) return;
+    }
     if (clock === 'all' && this.autoEnabled && !isBroken(this.state) && this.state.factoryRemainingMs === 0) {
       this.autoElapsed += ms;
       // Reporter l'excédent garde la cadence de 2 s ; un refus (plafond) repart de zéro, sans file.
-      if (this.autoElapsed >= CONFIG.autoInterval) {
-        const overrun = Math.min(this.autoElapsed - CONFIG.autoInterval, CONFIG.autoInterval - 1);
+      const interval = this.autoInterval();
+      if (this.autoElapsed >= interval) {
+        const overrun = Math.min(this.autoElapsed - interval, interval - 1);
+        // Un refus (plafond) saute ce lancement sans le mettre en file.
         this.autoElapsed = this.launch('auto') ? overrun : 0;
+        this.autoStep++;
       }
     }
   }
@@ -257,7 +340,7 @@ export class Game {
     const next = reconcile(state).state;
     if (!this.commit(next)) return false;
     this.autoEnabled = false;
-    this.autoElapsed = 0;
+    this.autoElapsed = 0; this.autoStep = 0;
     this.fractionalMs = 0;
     this.notice = 'Partie importée. Les billes en cours ont été réglées ; l’automatisation est arrêtée.';
     return true;

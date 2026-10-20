@@ -11,6 +11,8 @@ import type { CameraPose, Navigation, View } from '../navigation/camera';
 import { DiegeticInterface } from './interfaces';
 import { MagnetModule } from './magnets';
 import { CollectorModule } from './collector';
+import { RiftModules } from './rift';
+import { digitalModule } from '../game/state';
 import { CaveDecor, finishSurface, wovenRug } from './decor';
 import type { InterfaceState } from './interfaces';
 import type { Ball, GameState } from '../game/state';
@@ -66,7 +68,11 @@ export class PlinkoScene {
   private bonusMaterial = new THREE.MeshStandardMaterial({ color: '#ffdd8e', metalness: 0.7, roughness: 0.2, emissive: '#c87928', emissiveIntensity: 0.45 });
   private modules = new Map<string, THREE.Group>();
   private magnets!: MagnetModule;
+  private capacitorLamps: THREE.MeshStandardMaterial[] = [];
+  private gearLever = new THREE.Group();
   private collector!: CollectorModule;
+  private rift!: RiftModules;
+  private twinMaterial = new THREE.MeshStandardMaterial({ color: '#c9b3f2', emissive: '#8e64d8', emissiveIntensity: 0.5, transparent: true, opacity: 0.55, roughness: 0.2 });
   private collectorMaterial = new THREE.MeshStandardMaterial({ color: '#c4aed4', metalness: 0.65, roughness: 0.25 });
   private indicator!: THREE.Mesh;
   private lamps: THREE.Mesh[] = [];
@@ -282,23 +288,58 @@ export class PlinkoScene {
         for (let i = 0; i < 7; i++) { const ball = new THREE.Mesh(this.ballGeometry, this.silver); ball.scale.setScalar(1.7); ball.position.set((i % 2 - 0.5) * 0.23, 1.2 + i * 0.27, 0.15); group.add(ball); }
         this.rod(group, [0, -0.6, 0.8], [0.4, -1.35, 1.1], 0.15, this.sage); this.rod(group, [0.4, -1.35, 1.1], [1.15, -1.5, 1.05], 0.1, this.brass);
         this.rod(group, [-0.5, -0.7, -0.4], [-0.7, -3.3, -0.45], 0.1, this.sage);
+      } else if (slot.id === 'capacitor') {
+        // Condensateur de poche : boîtier lavande, deux voyants pour deux charges stockées.
+        const body = this.box(group, 1.15, 0.62, 0.42, 0, 0, 0, this.lavender, 0.12);
+        this.cylinder(group, 0.17, 0.95, 0, 0.42, 0.02, this.cream, 'x');
+        for (const x of [-0.5, 0.5]) this.cylinder(group, 0.19, 0.05, x, 0.42, 0.02, this.brass, 'x');
+        for (const x of [-0.25, 0.25]) {
+          const lamp = new THREE.MeshStandardMaterial({ color: '#7d6f62', emissive: '#ffc477', emissiveIntensity: 0, roughness: 0.4 });
+          const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 10), lamp); bulb.position.set(x, -0.04, 0.24); group.add(bulb); this.capacitorLamps.push(lamp);
+        }
+        const label = lettering('CHARGES', 0.8, 0.14, '#3b3446', '#d8cfe2'); label.position.set(0, -0.23, 0.215); group.add(label);
+        this.register(body, 'commandes', () => {
+          const charges = this.currentState?.charges ?? 0;
+          return `Condensateur de poche — ${charges}/2 charge${charges > 1 ? 's' : ''} de Décharge prête${charges > 1 ? 's' : ''}`;
+        }, ['plinko']);
+      } else if (slot.id === 'gearbox') {
+        // Boîte de vitesses : carter, engrenage visible et levier à deux positions.
+        const housing = this.box(group, 1.15, 1.0, 0.5, 0, 0, 0, this.sage, 0.14);
+        // Console boulonnée au montant de la machine.
+        this.box(group, 0.55, 0.32, 0.36, 0.82, -0.1, -0.05, this.iron, 0.05);
+        for (const y of [-0.2, 0]) this.cylinder(group, 0.035, 0.05, 0.98, y, 0.15, this.brass, 'z');
+        const gear = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.06, 20), this.brass); gear.rotation.x = Math.PI / 2; gear.position.set(-0.25, 0.18, 0.27); group.add(gear);
+        for (let i = 0; i < 12; i++) { const tooth = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.06), this.brass); const a = i * Math.PI / 6; tooth.position.set(-0.25 + Math.cos(a) * 0.29, 0.18 + Math.sin(a) * 0.29, 0.27); tooth.rotation.z = a; group.add(tooth); }
+        this.cylinder(group, 0.07, 0.1, 0.22, -0.12, 0.27, this.iron, 'z');
+        this.gearLever.position.set(0.22, -0.12, 0.3); group.add(this.gearLever);
+        this.rod(this.gearLever, [0, 0, 0], [0, 0.5, 0.05], 0.035, this.iron);
+        const knob = new THREE.Mesh(new THREE.SphereGeometry(0.09, 14, 10), this.pink); knob.position.set(0, 0.52, 0.05); this.gearLever.add(knob);
+        const left = lettering('RÉGULIER', 0.5, 0.12, '#283c33', '#e5dcc2'); left.position.set(-0.27, -0.36, 0.26); group.add(left);
+        const right = lettering('RAFALE', 0.42, 0.12, '#283c33', '#e5dcc2'); right.position.set(0.3, -0.36, 0.26); group.add(right);
+        const label = () => this.currentState?.gearMode === 'burst'
+          ? 'Boîte de vitesses — rafales (3 billes toutes les 6 s) · passer au rythme régulier'
+          : 'Boîte de vitesses — régulier (1 bille toutes les 2 s) · passer en rafales';
+        this.register(housing, 'gear', label, ['plinko', 'commandes']);
+        this.gearLever.traverse(object => { if (object instanceof THREE.Mesh) this.register(object, 'gear', label, ['plinko', 'commandes']); });
       } else if (slot.id === 'accounting_tray') {
         this.box(group, 1.5, 1.85, 1.15, 0, 0, 0, this.pink, 0.24); this.screen(group, 0, 0.36, 0.62, 1, 0.52);
         this.box(group, 1.08, 0.12, 0.1, 0, -0.42, 0.65, this.iron);
         const receipt = lettering('TICKET', 0.86, 1.2, '#665643', '#e7dbbd'); receipt.position.set(0, -1.0, 0.72); receipt.rotation.x = -0.15; group.add(receipt);
         for (const x of [-0.4, 0, 0.4]) this.cylinder(group, 0.11, 0.07, x, -0.09, 0.65, this.cream, 'z'); this.target('historique', group, 0, 0, 0.85, 1.5, 2.5, () => 'Consulter les gains — ticket du Bac comptable', ['plinko', 'commandes']);
       } else if (slot.id === 'duplicator') {
-        this.box(group, 6.2, 1.2, 0.9, 0, 0, 0, this.cream, 0.16);
-        const chamber = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.8, 0.5), new THREE.MeshStandardMaterial({ color: '#b5e1d0', transparent: true, opacity: 0.4 })); chamber.position.z = 0.55; group.add(chamber);
-        for (const x of [-2.15, 2.15]) this.cylinder(group, 0.5, 0.35, x, -0.15, 0.55, this.brass, 'z');
-      } else if (slot.id === 'instability_counter') {
-        this.box(group, 1.6, 2.1, 1, 0, 0, 0, this.cream, 0.25); this.screen(group, 0, 0.36, 0.56, 1.15, 0.7);
-        for (const [i, material] of [this.sage, this.brass, this.pink].entries()) this.cylinder(group, 0.14, 0.07, (i - 1) * 0.43, -0.5, 0.58, material, 'z');
+        // Duplicateur : armoire compacte au pied de la machine, chambre vitrée et deux bobines ; la faille luit au centre.
+        this.box(group, 1.7, 2.3, 1.0, 0, 0, 0, this.cream, 0.16);
+        const chamber = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.35, 0.25), new THREE.MeshStandardMaterial({ color: '#b5e1d0', transparent: true, opacity: 0.35, roughness: 0.15 })); chamber.position.set(0, 0.15, 0.5); group.add(chamber);
+        for (const x of [-0.62, 0.62]) { this.cylinder(group, 0.16, 0.95, x, 0.15, 0.45, this.brass); for (let i = 0; i < 4; i++) this.cylinder(group, 0.19, 0.04, x, -0.2 + i * 0.23, 0.45, this.iron); }
+        const plaque = lettering('DUPLICATEUR', 1.2, 0.22, '#3b3446', '#d8cfe2'); plaque.position.set(0, -0.85, 0.505); group.add(plaque);
+      } else if (slot.id === 'instability_counter' || slot.id === 'digital') {
+        // Construits par RiftModules après la boucle.
       } else {
         this.box(group, 2.4, 1.7, 1.7, 0, 0, 0, this.cream, 0.27); this.cylinder(group, 0.64, 0.1, 0, 0, 0.9, this.iron, 'z');
         for (let i = 0; i < 6; i++) { const angle = i * Math.PI / 3; this.rod(group, [0, 0, 0.98], [Math.cos(angle) * 0.62, Math.sin(angle) * 0.62, 0.98], 0.035, this.brass); }
       }
     }
+    this.rift = new RiftModules(this.modules.get('instability_counter')!, this.modules.get('digital')!, this.modules.get('duplicator')!, this.register.bind(this));
   }
   private buildRoom() {
     const mortar = new THREE.MeshStandardMaterial({ color: '#55473b', roughness: 1 });
@@ -559,7 +600,7 @@ export class PlinkoScene {
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })); plane.position.set(x, y, z); parent.add(plane); this.register(plane, action, label, views);
   }
   private reachable(object: THREE.Object3D) {
-    if (!this.interactionEnabled || this.navigation.moving || (object.userData.views && !object.userData.views.includes(this.navigation.target)) || !this.interfaces.actionAvailable(object.userData.action)) return false;
+    if (!this.interactionEnabled || this.navigation.moving || (object.userData.views && !object.userData.views.includes(this.navigation.target)) || !this.interfaces.actionAvailable(object.userData.action) || !this.rift.actionAvailable(object.userData.action)) return false;
     let node: THREE.Object3D | null = object;
     while (node) { if (!node.visible) return false; node = node.parent; }
     const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse));
@@ -674,9 +715,12 @@ export class PlinkoScene {
     this.currentState = state; this.navigation.advance(delta, state.preferences.reducedMotion);
     if (active && !state.preferences.reducedMotion) this.environmentTime += delta;
     this.updateCamera(); this.updateRain();
-    for (const slot of MODULE_SLOTS) { const group = this.modules.get(slot.id)!, visible = (state.upgrades as readonly string[]).includes(slot.unlockId) || (slot.id === 'magnets' && !!this.ui.magnetsAvailable) || (slot.id === 'collector' && !!this.ui.collectorAvailable); if (visible !== group.visible) { group.visible = visible; this.renderer.shadowMap.needsUpdate = true; } }
+    for (const slot of MODULE_SLOTS) { const group = this.modules.get(slot.id)!, visible = (state.upgrades as readonly string[]).includes(slot.unlockId) || (slot.id === 'magnets' && !!this.ui.magnetsAvailable) || (slot.id === 'collector' && !!this.ui.collectorAvailable) || (slot.id === 'instability_counter' && state.upgrades.includes('azur.duplicator')) || (slot.id === 'digital' && digitalModule(state)); if (visible !== group.visible) { group.visible = visible; this.renderer.shadowMap.needsUpdate = true; } }
     this.magnets.update(state, this.ui.autoEnabled);
+    this.capacitorLamps.forEach((lamp, i) => { lamp.emissiveIntensity = i < state.charges ? 1.4 : 0; });
+    this.gearLever.rotation.z = state.gearMode === 'burst' ? -0.5 : 0.5;
     this.collector.update(state);
+    this.rift.update(state, this.ui, performance.now());
     this.element.dataset.modules = MODULE_SLOTS.filter(slot => this.modules.get(slot.id)!.visible).map(slot => slot.id).join(',');
     if (this.wallet !== state.walletCents) {
       this.wallet = state.walletCents; const canvas = this.counter.image as HTMLCanvasElement, ctx = canvas.getContext('2d')!;
@@ -714,5 +758,7 @@ export class PlinkoScene {
   }
   private addBall(ball: Ball) {
     const mesh = new THREE.Mesh(this.ballGeometry, ball.bonus > 1 ? this.bonusMaterial : ball.origin === 'collector' ? this.collectorMaterial : ball.origin === 'auto' ? this.autoMaterial : this.silver); this.machine.add(mesh); this.flights.set(ball.id, { mesh, points: pathToExit(ball.exit, Math.random, ball.magnetFrom), elapsed: 0 });
+    // Bille dupliquée : un double translucide l’accompagne pendant toute sa chute.
+    if (ball.duplicated) { const twin = new THREE.Mesh(this.ballGeometry, this.twinMaterial); twin.position.set(0.2, 0.08, -0.06); twin.scale.setScalar(0.92); mesh.add(twin); }
   }
 }

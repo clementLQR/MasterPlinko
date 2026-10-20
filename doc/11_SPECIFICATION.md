@@ -106,6 +106,8 @@ Aucun compte à rebours ne doit faire repayer une réparation.
 | azur.auto_launcher | 40 pièces | Réparation installée | Ajouter marche/arrêt dès l’achat |
 | azur.accounting_tray | 15 pièces | Réparation installée | Consulter les 100 derniers résultats dès l’achat |
 | azur.magnets | 200 pièces | Réparation et Doigt installés | Attirer périodiquement une bille automatique vers une case voisine supérieure |
+| azur.capacitor | 150 pièces | Réparation installée | Stocker jusqu’à deux charges de Décharge, une par activation, sans cumul |
+| azur.gearbox | 100 pièces | Réparation et Doigt installés | Levier : 1 bille / 2 s ou rafales de 3 billes / 6 s |
 | azur.collector | 120 pièces | Réparation installée | Dix sorties sous ×1 donnent une bille gratuite de base 1 |
 
 Le livre de l’établi de la cave est supprimé, ainsi que sa vue et ses interactions d’achat. Acheter les plans exclusivement chez Azur : devis physique sur le comptoir public pour la réparation, puis zones d’achat dans les cinq premières doubles pages du carnet de l’atelier privé. Les autres pages restent des études sans achat, prix inventé ou activation des essais DEV. Consulter ou feuilleter n’achète rien.
@@ -135,19 +137,28 @@ Figer `collectorEligible: true` au lancement des manuelles/Doigt admissibles ; c
 Collecteur introduit au format 4, conservé au format actuel 6 avec migration des formats 1/2/3/4/5 : réservoir initialement nul pour les formats antérieurs à 4, résultats antérieurs préservés ; `collectorCharge` entier de 0 à 10, nouvelles origines et contributions validées. Une récompense déjà lancée est réglée une fois, même sans essai ; une récompense en réserve reste en attente sans module installé ni prêt DEV. Module 3D et cadrage `collecteur` pour lire le compteur, survol/focus et retour physique/Échap sans HUD ; billes lavande, origine lisible dans historique et dernier résultat. Détail et impact théorique au fichier 05, suivi MP-040.
 
 ### Autres concepts futurs retenus
-Le créateur retient **Condensateur de poche**, stockage d’une deuxième charge de Décharge, et **Boîte de vitesses**, rythme régulier ou rafales du Doigt avec la même production moyenne. Suivi MP-041 à MP-042. Seuls ces principes sont retenus : prix, déblocages, seuils, rythmes, interactions et persistance restent à définir aux fichiers 05 et 09. Le facteur ×2 n’est pas augmenté et aucun cumul de bonus n’est décidé.
+### Condensateur de poche et Boîte de vitesses
+**Condensateur de poche** (`azur.capacitor`, **150 pièces**, réglage choisi par le créateur le 20 octobre 2026) : vendu chez Azur après la réparation, installé dès l’achat. La Surchauffe stocke jusqu’à **deux charges** de Décharge : une fois la première prête, le comptage continue vers la seconde (100 règlements par charge). Chaque activation consomme une charge pour ×2 pendant 10 s ; pendant un bonus, ni comptage ni seconde activation : aucun cumul, facteur inchangé. La progression vers la charge suivante est conservée à l’activation. Deux voyants sur un boîtier lavande à gauche du bouton de Décharge, aucun HUD. Suivi MP-041.
+
+**Boîte de vitesses** (`azur.gearbox`, **100 pièces**, réglage choisi par le créateur le 20 octobre 2026) : vendue chez Azur avec le Doigt installé, installée dès l’achat. Levier physique à deux positions sur la machine : **régulier** (une bille toutes les 2 s) ou **rafale** (3 billes à 0,25 s d’écart toutes les 6 s), soit 0,5 bille/s dans les deux cas. Première bille 2 s après la mise en marche ; le changement de mode fait repartir la cadence de zéro. Au plafond de 50, une bille de rafale refusée est sautée, jamais mise en file. Mode `gearMode` sauvegardé ; aimants, Collecteur et Décharge inchangés. Suivi MP-042. Leurs pages du carnet d’Azur (6 et 7) vendent ces améliorations ; la page du module numérique reste une étude.
 
 Le **Ressort de deuxième chance** est classé dans la famille des **billes spéciales** (MP-020). Il permet un second passage possible ; le premier passage ne paie pas, seul le résultat final est crédité. Il ne constitue pas une quatrième amélioration de machine dans cette sélection. Obtention, fréquence, déclenchement du second passage et articulation avec capacité/Surchauffe/modules restent ouverts. Préserver le résultat déterminé au lancement et un paiement final unique, sans nouveau tirage à la reprise.
 
-Le créateur demande également un **module numérique** permettant d’accéder aux **améliorations téléchargeables** du Plinko (MP-044). Le module et sa branche logicielle sont à prévoir pour plus tard ; catalogue, effets, prix, déblocage, installation et cumuls restent à définir aux fichiers 05 et 09. La consultation devra appartenir au support 3D, sans HUD. Cette intention n’ajoute pas de serveur ni de compte au périmètre local.
+### Duplicateur, faille et recalibrage
+**Duplicateur** (`azur.duplicator`, **300 pièces**, décision du créateur du 20 octobre 2026) : vendu chez Azur après la réparation (page 9 du carnet), installé dès l’achat, armoire au pied gauche de la machine. Une bille sur 20 finissant sur ×1,5 ou plus est **payée deux fois** ; le tirage est fait au lancement avec le résultat (champ `duplicated`, retour figé doublé), jamais après. Il **ouvre une faille spatio-temporelle** : le Compteur d’instabilité apparaît et se remplit avec **1 000 pièces de retours bruts du Plinko** depuis l’achat.
+
+**Recalibrage, première version** (décision du créateur du 20 octobre 2026) : possible quand la faille est pleine, sans bille en vol, bonus en cours ni service. Le bouton RECALIBRER du compteur affiche d’abord sur son écran ce qui est **perdu** (solde ramené à 19 pièces, améliorations sauf la réparation, Surchauffe, réservoir du Collecteur, mise et rythme du Doigt), **conservé** (réparation et accès à Azur, historique du Bac, statistiques cumulées, réglages, téléchargements) et **gagné** (au premier recalibrage, le module numérique offert). Confirmer ou annuler (Échap) ; le temps de jeu est suspendu pendant la décision. Le Duplicateur est perdu : il faut le racheter pour rouvrir la faille. Pas d’Échos pour l’instant.
+
+### Module numérique
+**Module numérique** (MP-044) : offert par le premier recalibrage, terminal mural à droite de la machine avec cadrage `numerique`. On y feuillette le catalogue et on télécharge instantanément en payant en pièces : **seule exception** validée par le créateur à la règle « aucune vente dans la cave ». Téléchargements permanents, conservés aux recalibrages : **Mémoire de mise** (30 pièces : la mise descend au plus haut possible quand le solde manque, puis revient à la mise choisie), **Décharge auto** (60 : activation dès qu’une charge est prête, tant que le Doigt tourne), **Aimants 2.0** (120 : recharge 4 s au lieu de 5, Aimants installés requis à l’achat), **Surchauffe rapide** (150 : une charge en 80 billes au lieu de 100, ×2 et durée inchangés). Le catalogue appartient au support 3D, sans HUD ; aucun serveur ni compte.
 
 Ces autres concepts restent documentaires. Aimants et Collecteur sont désormais achetables aux prix confirmés, avec essais DEV facultatifs conservés.
 
 ## 8. Surchauffe
-À chaque règlement, compter une bille si le bonus n'est pas actuellement actif et qu'aucune charge n'est déjà prête.
-À 100, bloquer le compteur à 100 et allumer DÉCHARGE.
+À chaque règlement, compter une bille si le bonus n'est pas actuellement actif et que toutes les charges ne sont pas déjà prêtes (capacité 1, ou 2 avec le Condensateur de poche).
+À 100, ajouter une charge, remettre la progression à zéro et allumer DÉCHARGE ; le compteur s’arrête quand la capacité est atteinte.
 Activation possible seulement hors panne/usine, sans bonus actif :
-- Consommer la charge et remettre le compteur à zéro.
+- Consommer une charge ; la progression vers la charge suivante est conservée.
 - Activer x2 pendant 10 secondes actives.
 - Ne pas recharger pendant ce temps.
 À expiration, reprendre le comptage des prochains règlements.
@@ -316,4 +327,4 @@ Commandes visées : npm install (ou npm ci avec lockfile), npm run dev, npm run 
 Ne pas annoncer un déploiement, un dépôt distant ou une vérification visuelle non effectués.
 
 ## 14. Hors périmètre
-Chalet complet, personnages 3D détaillés, longs chapitres, Rapier pour les billes, mini-jeux élaborés, Marceau, Matéo, produits, grigris, résidus, trois plateaux, recalibrage, Paul, revenu hors ligne, comptes et SQL.
+Chalet complet, personnages 3D détaillés, longs chapitres, Rapier pour les billes, mini-jeux élaborés, Marceau, Matéo, produits, grigris, résidus, trois plateaux, recalibrage, Paul, revenu hors ligne, comptes et SQL. Le recalibrage complet (Échos, permanents, histoire) reste à venir ; seule sa première version liée au Duplicateur est dans le périmètre.

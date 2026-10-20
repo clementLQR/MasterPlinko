@@ -435,3 +435,29 @@ Vérifications exécutées :
 - `$env:PLINKO_GPU='1'; npx playwright test` : **28 réussis, 2 ignorés (prévus), aucun échec**. Le contrôle « bande fixe en mouvement réduit » vérifie désormais le décalage de la texture de bande.
 - Captures inspectées : `test-results/usine-tri.png`, `usine-arrivage.png`, `usine-explosion.png` (1440×1000 et 1280×720) ; fiches lisibles, billes et marques visibles, explosion lisible.
 - Limites : appréciation artistique à confirmer par le créateur. Aucun commit, push ou déploiement.
+
+## Condensateur de poche et Boîte de vitesses (MP-041, MP-042), 20 octobre 2026
+- [x] Réglages validés par le créateur : Condensateur 150 pièces (réparation requise), Boîte de vitesses 100 pièces (Doigt requis) ; module numérique reporté.
+- [x] Moteur : charges de Décharge `charges` (1, ou 2 avec le Condensateur) et progression `heatCount` ; une charge par activation, jamais pendant un bonus, facteur ×2 inchangé. Cadence du Doigt par mode : 2 s, ou rafales de 3 billes à 0,25 s toutes les 6 s ; levier `setGear` sauvegardé, cadence remise à zéro au changement ; refus au plafond sans file.
+- [x] Sauvegarde au format 7 : migration des formats 1 à 6 (`chargeReady` → `charges`, jauge pleine ramenée à 0, rythme régulier), refus des nouveaux identifiants dans un ancien format, cohérence charges/capacité/bonus/rythme validée.
+- [x] Achat aux pages 6 et 7 du carnet d’Azur, installés dès l’achat ; page 8 (module numérique) toujours en étude.
+- [x] Modules 3D : boîtier lavande à deux voyants à gauche de la Décharge, carter à engrenage et levier « RÉGULIER / RAFALE » fixé au montant ; écrans de Surchauffe et indications au survol adaptés ; cadrage « commandes » élargi pour les montrer.
+
+Vérifications exécutées :
+- `npm run typecheck`, `npm run build` (sans avertissement) et `npm test` : **87 réussis**, dont sept nouveaux (achats et prérequis, une charge sans Condensateur, deux charges sans cumul, rafales à production égale, levier et service, plafond sans file, migration du format 6).
+- `$env:PLINKO_GPU='1'; npx playwright test` : **29 réussis, 2 ignorés (prévus), aucun échec**, dont un nouveau parcours (modules visibles, levier au clavier, deux charges, rafale, reprise au format 7).
+- Capture `test-results/plinko-condensateur-boite.png` inspectée à 1280×720 : levier, engrenage, étiquettes et voyants lisibles.
+- Limites : intérêt de jeu et prix à confirmer en session par le créateur. Aucun commit, push ou déploiement.
+
+## Duplicateur, faille, recalibrage et module numérique (MP-018, MP-025, MP-044), 20 octobre 2026
+- [x] Décisions du créateur recueillies : déblocage du module par le premier recalibrage, recalibrage ouvert par le Duplicateur, catalogue et prix des téléchargements, achat instantané sur l’écran du module (exception à « aucune vente dans la cave »).
+- [x] Moteur : duplication tirée au lancement, faille mesurée depuis l’achat du Duplicateur, `recalibrate()` atomique (solde à 19, modules retirés sauf réparation, Surchauffe, Collecteur, mise et rythme remis à zéro ; historique, statistiques, réglages et téléchargements conservés), `buyDownload()` et effets (Surchauffe en 80, Décharge auto, Aimants en 4 s, Mémoire de mise).
+- [x] Sauvegarde au format 8 avec migration 1 à 7 et bilan monétaire étendu, contrôlé à l’import.
+- [x] Supports 3D : armoire du Duplicateur à faille lumineuse au pied gauche de la machine, Compteur d’instabilité à droite (jauge, récapitulatif CONFIRMER/ANNULER, bouton RECALIBRER), terminal mural du module numérique avec catalogue feuilletable ; billes dupliquées accompagnées d’un double translucide. Pages 8 à 10 du carnet d’Azur mises à jour, Duplicateur vendu en page 9.
+- [x] Défaut corrigé au passage : l’ancien emplacement réservé au Duplicateur recouvrait l’écran du dernier résultat ; le compteur chevauchait le montant droit de la machine et rendait CONFIRMER inaccessible au clavier.
+
+Vérifications exécutées :
+- `npm run typecheck`, `npm run build` (sans avertissement) et `npm test` : **94 réussis**, dont sept nouveaux (achat et faille, duplication tirée au lancement, conditions du recalibrage, remise à zéro et conservation, téléchargements permanents, effets des quatre téléchargements, migration du format 7).
+- `$env:PLINKO_GPU='1'; npx playwright test` : **30 réussis, 2 ignorés (prévus), aucun échec**, dont un nouveau parcours (récapitulatif, annulation par Échap, confirmation, module offert, téléchargement unique conservé au rechargement).
+- Captures inspectées à 1280×720 : `plinko-duplicateur-faille.png`, `faille-recapitulatif.png`, `module-numerique.png`.
+- Limites : rythme de la faille (1 000 pièces), intérêt des téléchargements et prix à juger en session ; résidus, Échos et lien avec l’histoire non traités. Aucun commit, push ou déploiement.
